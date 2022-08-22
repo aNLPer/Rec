@@ -256,7 +256,7 @@ for epoch in range(EPOCH):
                                                                              gold_item_id=gold_item_id,
                                                                              user_id=uid)
             with torch.no_grad():
-                next_state = actor.budget_net(item_id_pred,uid)
+                next_state = actor.budget_net(item_id_pred,gold_item_id,uid)
 
             td_error = critic.train_Q_network(
                 cur_state.clone().detach(),
