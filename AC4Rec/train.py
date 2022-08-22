@@ -97,6 +97,7 @@ class Actor(object):
         self.item_policys = item_policys
 
     def choose_action(self, cur_item_id, gold_item_id, user_id):
+        reward = 0
         # 估计用户的预算  [budget_dim]
         if len(self.item_action_memory) != 0:
             pre_item_id = self.item_action_memory[-1]
@@ -117,9 +118,10 @@ class Actor(object):
 
         # 根据预测出来item和gold_item的相似度(这里选择的是价格差)设计reward。
         selected_item_price = dp.itemPrice[self.budget_blocks[selected_budget_block_id][selected_item_id][0]]
-        gold_price = dp.itemPrice[gold_item_id]
         user_budget = self.user_budget[user_id]
-        if abs(selected_item_price-gold_price)<user_budget*0.2:
+        if self.budget_blocks[selected_budget_block_id][selected_item_id][0] == gold_item_id:
+            reward = 5
+        elif selected_item_price < user_budget[1] and selected_item_price>user_budget[0]:
             reward = 1
         else:
             reward = -1
