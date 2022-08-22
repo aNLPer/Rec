@@ -14,17 +14,17 @@ from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_se
 from torch.distributions import Categorical
 from AC4Rec.utils import DataPre, Voc, data_split, Policy, BudgetNet, item_split, action_select, action_distribution
 
-# data prepare
-df = pd.read_csv('../dataset/filtered_data.csv')
-basetime = datetime.datetime.strptime(df['出价时间'].min(), '%Y-%m-%d')
-# 将出价时间设置为与basetime的差
-df['出价时间'] = df['出价时间'].apply(lambda x: (datetime.datetime.strptime(x, '%Y-%m-%d') - basetime).days)
-
-dp = DataPre(df)
-
-f = open("./dp.pkl", "wb")
-pickle.dump(dp, f)
-f.close()
+# # data prepare
+# df = pd.read_csv('../dataset/filtered_data.csv')
+# basetime = datetime.datetime.strptime(df['出价时间'].min(), '%Y-%m-%d')
+# # 将出价时间设置为与basetime的差
+# df['出价时间'] = df['出价时间'].apply(lambda x: (datetime.datetime.strptime(x, '%Y-%m-%d') - basetime).days)
+#
+# dp = DataPre(df)
+#
+# f = open("./dp.pkl", "wb")
+# pickle.dump(dp, f)
+# f.close()
 
 print("loading dataset...")
 with open("./dp.pkl", "rb") as f:
