@@ -74,10 +74,13 @@ class DataPre:
         userBudgets = [0] * self.userVoc.num_words
         for key, values in self.seq.items():
             provide_prices = [p[2] for p in values]
-            if len(values) > 3:
-                userBudgets[key] = int((sum(provide_prices)-max(provide_prices)-min(provide_prices))/(len(provide_prices)-2))
-            else:
-                userBudgets[key] = int(sum(provide_prices)/len(provide_prices))
+            provide_prices.remove(max(provide_prices))
+            provide_prices.remove(min(provide_prices))
+            userBudgets[key] = (min(provide_prices), max(provide_prices))
+            # if len(values) > 3:
+            #     userBudgets[key] = int((sum(provide_prices)-max(provide_prices)-min(provide_prices))/(len(provide_prices)-2))
+            # else:
+            #     userBudgets[key] = int(sum(provide_prices)/len(provide_prices))
         self.userBudgets = userBudgets
 
 class Policy(nn.Module):
@@ -117,20 +120,24 @@ class BudgetNet(nn.Module):
             nn.Linear(int(0.5*gru_hidden_size), budget_dim)
         )
 
-    def forward(self, item_id, user_id):
+    def forward(self, pre_item_id, cur_item_id, user_id):
         """
         """
         # [user_dim]
         user_em = self.user_em(torch.LongTensor([user_id]).to(device))
-        # [seq_len, item_dim]
-        item_em = self.item_em(torch.LongTensor([item_id]).to(device))
-
+        # [item_dim]
+        cur_item_em = self.item_em(torch.LongTensor([cur_item_id]).to(device))
+        if pre_item_id is not None:
+            pre_item_em = self.item_em(torch.LongTensor([pre_item_id]).to(device))
+            item_em = cur_item_em + pre_item_em
+        else:
+            item_em = cur_item_em
         # 初始化隐藏状态
-        # [seq_len, gru_hidden_size]
+        # [gru_hidden_size]
         out = self.gru(item_em)
-        # [seq_len, budget_dim]
+        # [budget_dim]
         budget_pred = self.fc(out)
-        # [seq_len, budget_dim]
+        # [budget_dim]
         return budget_pred+user_em
 
 def item_split(items_price, step):
@@ -224,7 +231,9 @@ def category_sampling(prob):
     return m.sample().item()
 
 if __name__=="__main__":
-    # item_prices = range(50000)
-    state = torch.randn(size=[10], dtype=torch.float32)
-    #
+    a = [1,3,2]
+    provide_prices = [1,3,2]
+    provide_prices.remove(max(provide_prices))
+    provide_prices.remove(min(provide_prices))
+    print(provide_prices)
 

@@ -15,17 +15,16 @@ from torch.distributions import Categorical
 from AC4Rec.utils import DataPre, Voc, data_split, Policy, BudgetNet, item_split, action_select, action_distribution
 
 # data prepare
-df = pd.read_csv('../dataset/filtered_data.csv')
-basetime = datetime.datetime.strptime(df['出价时间'].min(), '%Y-%m-%d')
-# 将出价时间设置为与basetime的差
-df['出价时间'] = df['出价时间'].apply(lambda x: (datetime.datetime.strptime(x, '%Y-%m-%d') - basetime).days)
-
-dp = DataPre(df)
-
-f = open("./dp.pkl", "wb")
-pickle.dump(dp, f)
-f.close()
-
+# df = pd.read_csv('../dataset/filtered_data.csv')
+# basetime = datetime.datetime.strptime(df['出价时间'].min(), '%Y-%m-%d')
+# # 将出价时间设置为与basetime的差
+# df['出价时间'] = df['出价时间'].apply(lambda x: (datetime.datetime.strptime(x, '%Y-%m-%d') - basetime).days)
+#
+# dp = DataPre(df)
+#
+# f = open("./dp.pkl", "wb")
+# pickle.dump(dp, f)
+# f.close()
 print("loading dataset...")
 with open("./dp.pkl", "rb") as f:
     dp = pickle.load(f)
@@ -59,7 +58,7 @@ class Actor(object):
         self.item_dim = item_dim
         self.item_price = item_price  # sorted [(item_id, item_price),(),......]
         self.user_budget = user_budegt # user budgets
-        self.budget_blocks_action_memory = None
+        self.budget_blocks_action_memory = []
         self.item_action_memory = []
         self.budget_blocks = budget_blocks
 
@@ -97,20 +96,24 @@ class Actor(object):
         self.item_policys = item_policys
 
     def choose_action(self, cur_item_id, gold_item_id, user_id):
-        # 估计用户的预算  [budget_dim]
-        if len(self.item_action_memory) != 0:
-            pre_item_id = self.item_action_memory[-1]
-        else:
-            pre_item_id = None
-        budget = self.budget_net(pre_item_id, cur_item_id, user_id)
+        """
+        :param cur_item_id: [seq_len]
+        :param gold_item_id: [seq_len]
+        :param user_id: [1]
+        :return:
+        """
+        # 估计用户的预算  [seq_len, budget_dim]
+        budget = self.budget_net(cur_item_id, user_id)
 
         # 根据budget选择budget_block
         selected_budget_block_id, selected_budget_block_prob = action_select(budget, len(self.budget_blocks), self.budget_policys)
         # self.budget_blocks_action_memory.append(selected_budget_block_id)
 
+        # budget_blocks_dist = action_distribution(budget, len(self.budget_blocks), self.budget_policys)
+
         # 根据budgets选择item
         selected_item_id, selected_item_prob = action_select(budget, len(self.budget_blocks[selected_budget_block_id]), self.item_policys)
-        self.item_action_memory.append(selected_item_id)
+        # self.item_action_memory.append(selected_item_id)
 
         # 计算item_action的概率分布
         item_action_dist = action_distribution(budget,len(self.budget_blocks[selected_budget_block_id]),self.item_policys)
@@ -244,27 +247,27 @@ for epoch in range(EPOCH):
 
     start = time.time()
     for uid, eps in list(train_data.items())[:100]:
-        # 清空memory
-        actor.item_action_memory = []
-        for i in range(len(eps)-1):
-            input_item_id = eps[i][0]
-            gold_item_id = eps[i+1][0]
+        seq = [item[0] for item in eps]
+        # for i in range(len(eps)-1):
+        #     input_item_id = eps[i][0]
+        #     gold_item_id = eps[i+1][0]
+        input_item_id = seq[:-1]
+        gold_item_id = seq[1:]
+        cur_state, item_dist, item_id_pred, reward = actor.choose_action(cur_item_id=input_item_id,
+                                                                         gold_item_id=gold_item_id,
+                                                                         user_id=uid)
+        with torch.no_grad():
+            next_state = actor.budget_net(item_id_pred,uid)
 
-            cur_state, item_dist, item_id_pred, reward = actor.choose_action(cur_item_id=input_item_id,
-                                                                             gold_item_id=gold_item_id,
-                                                                             user_id=uid)
-            with torch.no_grad():
-                next_state = actor.budget_net(item_id_pred,uid)
+        td_error = critic.train_Q_network(
+            cur_state.clone().detach(),
+            reward,
+            next_state)
 
-            td_error = critic.train_Q_network(
-                cur_state.clone().detach(),
-                reward,
-                next_state)
-
-            actor.learn(item_id_pred, item_dist, td_error)
-            # print("end")
-            # true_gradient = grad[logPi(a|s) * td_error]
-            # 然后根据前面学到的V（s）值，训练actor，以更好地采样动作
+        actor.learn(item_id_pred, item_dist, td_error)
+        # print("end")
+        # true_gradient = grad[logPi(a|s) * td_error]
+        # 然后根据前面学到的V（s）值，训练actor，以更好地采样动作
         print(uid)
     total_reward = 0
     # 设置模型为训练状态
