@@ -127,6 +127,7 @@ class BudgetNet(nn.Module):
         user_em = self.user_em(torch.LongTensor([user_id]).to(device))
         # [item_dim]
         cur_item_em = self.item_em(torch.LongTensor([cur_item_id]).to(device))
+
         if pre_item_id is not None:
             pre_item_em = self.item_em(torch.LongTensor([pre_item_id]).to(device))
             item_em = cur_item_em + pre_item_em

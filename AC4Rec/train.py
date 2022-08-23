@@ -34,7 +34,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 DATA_PATH = '../dataset/filtered_data.csv'
 BATCH_SIZE = 32
 GAMMA = 0.9
-LR = 0.0001
+LR = 5e-4
 # ITEM_DIM == USER_DIM == BUDGET_DIM
 ITEM_DIM = 256
 USER_DIM = 256
@@ -77,9 +77,9 @@ class Actor(object):
             gru_hidden_size=GRU_HIDDEN_SIZE).to(device)
 
         # 优化器
-        self.budget_policy_optim = torch.optim.Adam([{"params":net.parameters()} for net in self.budget_policys], lr=LR)
-        self.budget_net_optim = torch.optim.Adam(self.budget_net.parameters(), lr=LR)
-        self.item_policy_optim = torch.optim.Adam([{"params":net.parameters()} for net in self.item_policys], lr=LR)
+        self.budget_policy_optim = torch.optim.Adam([{"params":net.parameters()} for net in self.budget_policys], lr=LR, weight_decay=0.05)
+        self.budget_net_optim = torch.optim.Adam(self.budget_net.parameters(), lr=LR, weight_decay=0.05)
+        self.item_policy_optim = torch.optim.Adam([{"params":net.parameters()} for net in self.item_policys], lr=LR, weight_decay=0.05)
 
     def genPolicys(self):
         budget_policys = []
@@ -97,7 +97,6 @@ class Actor(object):
         self.item_policys = item_policys
 
     def choose_action(self, cur_item_id, gold_item_id, user_id):
-        reward = 0
         # 估计用户的预算  [budget_dim]
         if len(self.item_action_memory) != 0:
             pre_item_id = self.item_action_memory[-1]
@@ -150,11 +149,11 @@ class Actor(object):
         loss_a.backward()
 
         # 梯度裁剪防止梯度爆炸
-        nn.utils.clip_grad_norm_(self.budget_net.parameters(), 1.0)
+        nn.utils.clip_grad_norm_(self.budget_net.parameters(), 0.1)
         for p in self.budget_policys:
-            nn.utils.clip_grad_norm_(p.parameters(), 1.0)
+            nn.utils.clip_grad_norm_(p.parameters(), 0.1)
         for p in self.item_policys:
-            nn.utils.clip_grad_norm_(p.parameters(), 1.0)
+            nn.utils.clip_grad_norm_(p.parameters(), 0.1)
 
         # 更新参数
         self.budget_net_optim.step()
@@ -267,7 +266,6 @@ for epoch in range(EPOCH):
             # print("end")
             # true_gradient = grad[logPi(a|s) * td_error]
             # 然后根据前面学到的V（s）值，训练actor，以更好地采样动作
-        print(uid)
     total_reward = 0
     # 设置模型为训练状态
     for p in actor.item_policys:
