@@ -138,22 +138,24 @@ class BudgetNet(nn.Module):
     def forward(self, pre_item_id, cur_item_id, user_id):
         """
         """
-        # [user_dim]
-        user_em = self.user_em(torch.LongTensor([user_id]).to(device))
-        # [item_dim]
-        cur_item_em = self.item_em(torch.LongTensor([cur_item_id]).to(device))
+        # [batch_size, user_dim]
+        user_em = self.user_em(torch.LongTensor(user_id).to(device))
+        # [batch_size, item_dim]
+        cur_item_em = self.item_em(torch.LongTensor(cur_item_id).to(device))
 
         if pre_item_id is not None:
-            pre_item_em = self.item_em(torch.LongTensor([pre_item_id]).to(device))
+            # [batch_size, item_dim]
+            pre_item_em = self.item_em(torch.LongTensor(pre_item_id).to(device))
             item_em = cur_item_em + pre_item_em
         else:
+            # [batch_size, item_dim]
             item_em = cur_item_em
         # 初始化隐藏状态
-        # [gru_hidden_size]
+        # [batch_size, gru_hidden_size]
         out = self.gru(item_em)
-        # [budget_dim]
+        # [batch_size, budget_dim]
         budget_pred = self.fc(out)
-        # [budget_dim]
+        # [batch_size, budget_dim]
         return budget_pred+user_em
 
 def item_split(items_price, step):
@@ -274,7 +276,9 @@ def pad_and_cut(data, length):
 
 
 if __name__=="__main__":
-    a = torch.tensor([[1,2,3]], dtype=torch.float32, requires_grad=True)
-    b = torch.tensor([[0,0,0]])
-    c = torch.concat([a,b],dim=1)
-    print("end")
+    a = [1,3,2]
+    provide_prices = [1,3,2]
+    provide_prices.remove(max(provide_prices))
+    provide_prices.remove(min(provide_prices))
+    print(provide_prices)
+
