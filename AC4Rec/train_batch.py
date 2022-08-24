@@ -64,7 +64,7 @@ class Actor(object):
         self.item_action_memory = []
         self.budget_blocks = budget_blocks
 
-        self.budget_policys = BudgetPolicy(input_dim=BUDGET_DIM, output_dim=BLOCK_NUM)
+        self.budget_policys = BudgetPolicy(input_dim=BUDGET_DIM, output_dim=BLOCK_NUM).to(device)
         self.item_policys = None
         self.genPolicys()
 
