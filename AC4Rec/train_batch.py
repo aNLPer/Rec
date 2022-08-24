@@ -265,39 +265,40 @@ train_data, eval_data = data_split(dp.seq, rate=0.8)
 for epoch in range(EPOCH):
     # 设置模型为训练状态
     start = time.time()
-    # for p in actor.item_policys:
-    #     p.train()
-    # actor.budget_policys.train()
-    # actor.budget_net.train()
-    # critic.network.train()
-    # for uids, seqs in data_loader(dp.seq, BATCH_SIZE):
-    #     BATCH_SIZE_ = len(uids)
-    #     # 清空memory
-    #     actor.item_action_memory = []
-    #     # 裁剪seq
-    #     min_length = min([len(s) for s in seqs])
-    #     seqs = pad_and_cut(np.array(seqs), min_length)
-    #     input_item_ids = seqs[:, :-1]
-    #     golden_item_ids = seqs[:, 1:]
-    #     for i in range(min_length-1):
-    #         inputs = input_item_ids[:, i]
-    #         golden = golden_item_ids[:, i]
-    #
-    #         budgets, item_action_dists, selected_item_ids, reward = actor.choose_action(cur_item_ids=inputs,
-    #                                                                          golden_item_ids=golden,
-    #                                                                          user_ids=uids)
-    #
-    #         with torch.no_grad():
-    #             next_budgets = actor.budget_net(selected_item_ids, golden, uids)
-    #
-    #         td_error = critic.train_Q_network(
-    #             budgets.clone().detach(),
-    #             reward,
-    #             next_budgets)
-    #
-    #         actor.learn(selected_item_ids, item_action_dists, td_error)
-    #         # true_gradient = grad[logPi(a|s) * td_error]
-    #         # 然后根据前面学到的V（s）值，训练actor，以更好地采样动作
+    for p in actor.item_policys:
+        p.train()
+    actor.budget_policys.train()
+    actor.budget_net.train()
+    critic.network.train()
+    for uids, seqs in data_loader(dp.seq, BATCH_SIZE):
+        BATCH_SIZE_ = len(uids)
+        # 清空memory
+        actor.item_action_memory = []
+        # 裁剪seq
+        min_length = min([len(s) for s in seqs])
+        seqs = pad_and_cut(np.array(seqs), min_length)
+        input_item_ids = seqs[:, :-1]
+        golden_item_ids = seqs[:, 1:]
+        for i in range(min_length-1):
+            inputs = input_item_ids[:, i]
+            golden = golden_item_ids[:, i]
+
+            budgets, item_action_dists, selected_item_ids, reward = actor.choose_action(cur_item_ids=inputs,
+                                                                             golden_item_ids=golden,
+                                                                             user_ids=uids)
+
+            with torch.no_grad():
+                next_budgets = actor.budget_net(selected_item_ids, golden, uids)
+
+            td_error = critic.train_Q_network(
+                budgets.clone().detach(),
+                reward,
+                next_budgets)
+
+            actor.learn(selected_item_ids, item_action_dists, td_error)
+            # true_gradient = grad[logPi(a|s) * td_error]
+            # 然后根据前面学到的V（s）值，训练actor，以更好地采样动作
+        print("batch")
     total_reward = 0
     # 设置模型为训练状态
     for p in actor.item_policys:
