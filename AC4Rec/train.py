@@ -12,7 +12,7 @@ import torch.nn.functional as F
 import torch.utils.data
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
 from torch.distributions import Categorical
-from AC4Rec.utils import DataPre, Voc, data_split, Policy, BudgetNet, item_split, action_select, action_distribution
+from AC4Rec.utils import DataPre, Voc, data_split, Policy, BudgetNet, item_split, action_select, action_distribution, data_loader, pad_and_cut, BudgetPolicy, category_sampling
 
 # # data prepare
 # df = pd.read_csv('../dataset/filtered_data.csv')
@@ -29,6 +29,8 @@ from AC4Rec.utils import DataPre, Voc, data_split, Policy, BudgetNet, item_split
 print("loading dataset...")
 with open("./dp.pkl", "rb") as f:
     dp = pickle.load(f)
+
+
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 DATA_PATH = '../dataset/filtered_data.csv'
@@ -49,8 +51,6 @@ item_price = list(enumerate(dp.itemPrice))
 item_price.sort(key=lambda x: x[1])
 budget_blocks = item_split(item_price, BLOCK_SIZE)
 
-
-
 class Actor(object):
     def __init__(self,user_num, user_dim, item_num, item_dim, item_price, user_budegt, budget_blocks):
         self.user_num = user_num
@@ -58,12 +58,12 @@ class Actor(object):
         self.item_num = item_num
         self.item_dim = item_dim
         self.item_price = item_price  # sorted [(item_id, item_price),(),......]
-        self.user_budget = user_budegt # user budgets
+        self.user_budget = user_budegt  # user budgets
         self.budget_blocks_action_memory = None
         self.item_action_memory = []
         self.budget_blocks = budget_blocks
 
-        self.budget_policys = None
+        self.budget_policys = BudgetPolicy(input_dim=BUDGET_DIM, output_dim=BLOCK_NUM)
         self.item_policys = None
         self.genPolicys()
 
@@ -77,23 +77,24 @@ class Actor(object):
             gru_hidden_size=GRU_HIDDEN_SIZE).to(device)
 
         # 优化器
-        self.budget_policy_optim = torch.optim.Adam([{"params":net.parameters()} for net in self.budget_policys], lr=LR, weight_decay=0.05)
+        # self.budget_policy_optim = torch.optim.Adam([{"params":net.parameters()} for net in self.budget_policys], lr=LR, weight_decay=0.05)
+        self.budget_policy_optim = torch.optim.Adam(self.budget_policys.parameters(), lr=LR, weight_decay=0.05)
         self.budget_net_optim = torch.optim.Adam(self.budget_net.parameters(), lr=LR, weight_decay=0.05)
         self.item_policy_optim = torch.optim.Adam([{"params":net.parameters()} for net in self.item_policys], lr=LR, weight_decay=0.05)
 
     def genPolicys(self):
-        budget_policys = []
+        # budget_policys = []
         item_policys = []
 
         # 按照BLOCK_NUM的大小生成budget范围选择策略网络
-        for i in range(math.ceil(math.log(BLOCK_NUM, 2))):
-            budget_policys.append(Policy(BUDGET_DIM).to(device))
+        # for i in range(math.ceil(math.log(BLOCK_NUM, 2))):
+        #     budget_policys.append(Policy(BUDGET_DIM).to(device))
 
         # 按照BLOCK_SIZE大小生成item选择策略网络
         for i in range(math.ceil(math.log(BLOCK_SIZE, 2))):
             item_policys.append(Policy(BUDGET_DIM).to(device))
 
-        self.budget_policys = budget_policys
+        # self.budget_policys = budget_policys
         self.item_policys = item_policys
 
     def choose_action(self, cur_item_id, gold_item_id, user_id):
@@ -105,25 +106,28 @@ class Actor(object):
         budget = self.budget_net(pre_item_id, cur_item_id, user_id)
 
         # 根据budget选择budget_block
-        selected_budget_block_id, selected_budget_block_prob = action_select(budget, len(self.budget_blocks), self.budget_policys)
+        # selected_budget_block_id, selected_budget_block_prob = action_select(budget, len(self.budget_blocks), self.budget_policys)
         # self.budget_blocks_action_memory.append(selected_budget_block_id)
+        budget_blocks_dist = self.budget_policys(budget)
+        selected_budget_block_id = category_sampling(budget_blocks_dist)
+        selected_budget_block_prob = budget_blocks_dist[0][selected_budget_block_id]
 
         # 根据budgets选择item
         selected_item_id, selected_item_prob = action_select(budget, len(self.budget_blocks[selected_budget_block_id]), self.item_policys)
         self.item_action_memory.append(selected_item_id)
 
         # 计算item_action的概率分布
-        item_action_dist = action_distribution(budget,len(self.budget_blocks[selected_budget_block_id]),self.item_policys)
+        item_action_dist = action_distribution(budget,len(self.budget_blocks[selected_budget_block_id]),self.item_policys, prob=selected_budget_block_prob)
 
         # 根据预测出来item和gold_item的相似度(这里选择的是价格差)设计reward。
         selected_item_price = dp.itemPrice[self.budget_blocks[selected_budget_block_id][selected_item_id][0]]
         user_budget = self.user_budget[user_id]
         if self.budget_blocks[selected_budget_block_id][selected_item_id][0] == gold_item_id:
-            reward = 5
+            reward = 0.1
         elif selected_item_price < user_budget[1] and selected_item_price>user_budget[0]:
-            reward = 1
+            reward = 0.05
         else:
-            reward = -1
+            reward = 0
 
         return budget, item_action_dist, selected_item_id, reward
 
@@ -150,8 +154,9 @@ class Actor(object):
 
         # 梯度裁剪防止梯度爆炸
         nn.utils.clip_grad_norm_(self.budget_net.parameters(), 0.1)
-        for p in self.budget_policys:
-            nn.utils.clip_grad_norm_(p.parameters(), 0.1)
+        # for p in self.budget_policys:
+        #     nn.utils.clip_grad_norm_(p.parameters(), 0.1)
+        nn.utils.clip_grad_norm_(self.budget_policys.parameters(), 0.1)
         for p in self.item_policys:
             nn.utils.clip_grad_norm_(p.parameters(), 0.1)
 
@@ -232,14 +237,26 @@ critic = Critic(input_dim=BUDGET_DIM)
 
 train_data, eval_data = data_split(dp.seq, rate=0.8)
 
+# for epoch in range(EPOCH):
+#     for uids, seqs in data_loader(dp.seq, BATCH_SIZE):
+#         min_length = min([len(s) for s in seqs])
+#         seqs = pad_and_cut(np.array(seqs), min_length)
+#         for i in range(min_length):
+#             items = seqs[:][i]
+#             print(items)
+
+
+
+
 
 # 训练
 for epoch in range(EPOCH):
     # 设置模型为训练状态
     for p in actor.item_policys:
         p.train()
-    for p in actor.budget_policys:
-        p.train()
+    # for p in actor.budget_policys:
+    #     p.train()
+    actor.budget_policys.train()
     actor.budget_net.train()
     critic.network.train()
 
@@ -270,8 +287,9 @@ for epoch in range(EPOCH):
     # 设置模型为训练状态
     for p in actor.item_policys:
         p.eval()
-    for p in actor.budget_policys:
-        p.eval()
+    # for p in actor.budget_policys:
+    #     p.eval()
+    actor.budget_policys.eval()
     actor.budget_net.eval()
     critic.network.eval()
     # 取消梯度跟踪

@@ -83,6 +83,21 @@ class DataPre:
             #     userBudgets[key] = int(sum(provide_prices)/len(provide_prices))
         self.userBudgets = userBudgets
 
+class BudgetPolicy(nn.Module):
+    def __init__(self, input_dim, output_dim):
+        super(BudgetPolicy, self).__init__()
+        self.fc = nn.Sequential(
+            nn.Linear(input_dim, output_dim),
+            nn.Softmax()
+        )
+    def forward(self, input):
+        """
+        根据当前状态
+        :return: [0~1]
+        """
+        out = self.fc(input)
+        return out
+
 class Policy(nn.Module):
     def __init__(self, input_dim):
         super(Policy, self).__init__()
@@ -218,18 +233,45 @@ def action_distribution(state, action_num, policys, prob = None):
 
     return item_in_block_dist
 
-def data_loader(uids, seq, shuffle, batch_size):
-    num_examples = len(seq)
+def data_loader(data, batch_size):
+    """
+    :param data: dict
+    :param batch_size: batch_size
+    :return:
+    """
+    # tuple:[8444]
+    sorted_data = sorted(data.items(), key=lambda x: len(x[1]))
+    uids = []
+    seqs = []
+    for uid, s in sorted_data:
+        uids.append(uid)
+        seqs.append([item[0] for item in s])
+    num_examples = len(seqs)
     indices = list(range(num_examples))
-    if shuffle:
-        random.shuffle(indices)  # 样本的读取顺序是随机的
     for i in range(0, num_examples, batch_size):
-        ids = indices[i: min(i + batch_size, num_examples)]  # 最后⼀次可能不⾜⼀个batch
-        yield [uids[j] for j in ids], [torch.tensor(seq[j][:-1]) for j in ids], [torch.tensor(seq[j][1:]) for j in ids]
+        ids = indices[i: min(i + batch_size, num_examples)]
+        # 最后⼀次可能不⾜⼀个batch
+        yield [uids[j] for j in ids], [seqs[j] for j in ids]
 
 def category_sampling(prob):
     m = Categorical(prob)
     return m.sample().item()
+
+def pad_and_cut(data, length):
+    """填充或截二维维numpy到固定的长度"""
+    # 将2维ndarray填充和截断到固定长度
+    n = len(data)
+    for i in range(n):
+        if len(data[i]) < length:
+            # 进行填充
+            data[i] = np.pad(data[i], pad_width=(0,length-len(data[i])))
+        if len(data[i]) > length:
+            # 进行截断
+            data[i] = data[i][:length]
+    # 转化为np.array()形式
+    new_data = np.array(data.tolist())
+    return new_data
+
 
 if __name__=="__main__":
     a = [1,3,2]
