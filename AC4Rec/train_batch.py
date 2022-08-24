@@ -153,6 +153,8 @@ class Actor(object):
                 reward += 0.1
             elif selected_item_prices[i] < user_budgets[i][1] and selected_item_prices[i]>user_budgets[i][0]:
                 reward += 0.05
+            else:
+                reward -= 0.05
 
         return budgets, item_action_dists, selected_item_ids, reward
 
@@ -262,96 +264,128 @@ train_data, eval_data = data_split(dp.seq, rate=0.8)
 
 for epoch in range(EPOCH):
     # 设置模型为训练状态
-    for p in actor.item_policys:
-        p.train()
-    actor.budget_policys.train()
-    actor.budget_net.train()
-    critic.network.train()
-    for uids, seqs in data_loader(dp.seq, BATCH_SIZE):
-        BATCH_SIZE_ = len(uids)
-        # 清空memory
-        actor.item_action_memory = []
-        # 裁剪seq
-        min_length = min([len(s) for s in seqs])
-        seqs = pad_and_cut(np.array(seqs), min_length)
-        input_item_ids = seqs[:, :-1]
-        golden_item_ids = seqs[:, 1:]
-        for i in range(min_length-1):
-            inputs = input_item_ids[:, i]
-            golden = golden_item_ids[:, i]
-
-            budgets, item_action_dists, selected_item_ids, reward = actor.choose_action(cur_item_ids=inputs,
-                                                                             golden_item_ids=golden,
-                                                                             user_ids=uids)
-
-            with torch.no_grad():
-                next_budgets = actor.budget_net(selected_item_ids, golden, uids)
-
-            td_error = critic.train_Q_network(
-                budgets.clone().detach(),
-                reward,
-                next_budgets)
-
-            actor.learn(selected_item_ids, item_action_dists, td_error)
-            # true_gradient = grad[logPi(a|s) * td_error]
-            # 然后根据前面学到的V（s）值，训练actor，以更好地采样动作
-
-
-
-
-
-# 训练
-for epoch in range(EPOCH):
-    # 设置模型为训练状态
-    for p in actor.item_policys:
-        p.train()
-    for p in actor.budget_policys:
-        p.train()
-    actor.budget_net.train()
-    critic.network.train()
-
     start = time.time()
-    for uid, eps in list(train_data.items())[:100]:
-        # 清空memory
-        actor.item_action_memory = []
-        for i in range(len(eps)-1):
-            input_item_id = eps[i][0]
-            gold_item_id = eps[i+1][0]
-
-            cur_state, item_dist, item_id_pred, reward = actor.choose_action(cur_item_id=input_item_id,
-                                                                             gold_item_id=gold_item_id,
-                                                                             user_id=uid)
-            with torch.no_grad():
-                next_state = actor.budget_net(item_id_pred,gold_item_id,uid)
-
-            td_error = critic.train_Q_network(
-                cur_state.clone().detach(),
-                reward,
-                next_state)
-
-            actor.learn(item_id_pred, item_dist, td_error)
-            # print("end")
-            # true_gradient = grad[logPi(a|s) * td_error]
-            # 然后根据前面学到的V（s）值，训练actor，以更好地采样动作
+    # for p in actor.item_policys:
+    #     p.train()
+    # actor.budget_policys.train()
+    # actor.budget_net.train()
+    # critic.network.train()
+    # for uids, seqs in data_loader(dp.seq, BATCH_SIZE):
+    #     BATCH_SIZE_ = len(uids)
+    #     # 清空memory
+    #     actor.item_action_memory = []
+    #     # 裁剪seq
+    #     min_length = min([len(s) for s in seqs])
+    #     seqs = pad_and_cut(np.array(seqs), min_length)
+    #     input_item_ids = seqs[:, :-1]
+    #     golden_item_ids = seqs[:, 1:]
+    #     for i in range(min_length-1):
+    #         inputs = input_item_ids[:, i]
+    #         golden = golden_item_ids[:, i]
+    #
+    #         budgets, item_action_dists, selected_item_ids, reward = actor.choose_action(cur_item_ids=inputs,
+    #                                                                          golden_item_ids=golden,
+    #                                                                          user_ids=uids)
+    #
+    #         with torch.no_grad():
+    #             next_budgets = actor.budget_net(selected_item_ids, golden, uids)
+    #
+    #         td_error = critic.train_Q_network(
+    #             budgets.clone().detach(),
+    #             reward,
+    #             next_budgets)
+    #
+    #         actor.learn(selected_item_ids, item_action_dists, td_error)
+    #         # true_gradient = grad[logPi(a|s) * td_error]
+    #         # 然后根据前面学到的V（s）值，训练actor，以更好地采样动作
     total_reward = 0
     # 设置模型为训练状态
     for p in actor.item_policys:
         p.eval()
-    for p in actor.budget_policys:
-        p.eval()
-    # actor.budget_policys.eval()
+    actor.budget_policys.eval()
     actor.budget_net.eval()
     critic.network.eval()
     # 取消梯度跟踪
     with torch.no_grad():
-        for uid, eps in list(eval_data.items())[:100]:
-            for i in range(len(eps) - 1):  # car_id, 是否中标, 出价金额, 出价时间
-                input_item_id = eps[i][0]
-                gold_item_id = eps[i + 1][0]
+        for uids, seqs in data_loader(dp.seq, BATCH_SIZE):
+            BATCH_SIZE_ = len(uids)
+            # 清空memory
+            actor.item_action_memory = []
+            # 裁剪seq
+            min_length = min([len(s) for s in seqs])
+            seqs = pad_and_cut(np.array(seqs), min_length)
+            input_item_ids = seqs[:, :-1]
+            golden_item_ids = seqs[:, 1:]
+            for i in range(min_length - 1):
+                inputs = input_item_ids[:, i]
+                golden = golden_item_ids[:, i]
 
-                _, _, _, reward = actor.choose_action(cur_item_id=input_item_id,
-                                                      gold_item_id=gold_item_id,
-                                                      user_id=uid)
-                total_reward += reward
+                budgets, item_action_dists, selected_item_ids, reward = actor.choose_action(cur_item_ids=inputs,
+                                                                                            golden_item_ids=golden,
+                                                                                            user_ids=uids)
+
+                total_reward+=reward
+                # true_gradient = grad[logPi(a|s) * td_error]
+                # 然后根据前面学到的V（s）值，训练actor，以更好地采样动作
+                print(total_reward)
     end = time.time()
-    print(f"epoch:{epoch}  total reward:{total_reward}  time:{round((end-start)/60, 2)}" )
+    print(f"epoch:{epoch}  total reward:{total_reward}  time:{round((end - start) / 60, 2)}")
+
+
+
+
+# # 训练
+# for epoch in range(EPOCH):
+#     # 设置模型为训练状态
+#     for p in actor.item_policys:
+#         p.train()
+#     for p in actor.budget_policys:
+#         p.train()
+#     actor.budget_net.train()
+#     critic.network.train()
+#
+#     start = time.time()
+#     for uid, eps in list(train_data.items())[:100]:
+#         # 清空memory
+#         actor.item_action_memory = []
+#         for i in range(len(eps)-1):
+#             input_item_id = eps[i][0]
+#             gold_item_id = eps[i+1][0]
+#
+#             cur_state, item_dist, item_id_pred, reward = actor.choose_action(cur_item_id=input_item_id,
+#                                                                              gold_item_id=gold_item_id,
+#                                                                              user_id=uid)
+#             with torch.no_grad():
+#                 next_state = actor.budget_net(item_id_pred,gold_item_id,uid)
+#
+#             td_error = critic.train_Q_network(
+#                 cur_state.clone().detach(),
+#                 reward,
+#                 next_state)
+#
+#             actor.learn(item_id_pred, item_dist, td_error)
+#             # print("end")
+#             # true_gradient = grad[logPi(a|s) * td_error]
+#             # 然后根据前面学到的V（s）值，训练actor，以更好地采样动作
+#     total_reward = 0
+#     # 设置模型为训练状态
+#     for p in actor.item_policys:
+#         p.eval()
+#     for p in actor.budget_policys:
+#         p.eval()
+#     # actor.budget_policys.eval()
+#     actor.budget_net.eval()
+#     critic.network.eval()
+#     # 取消梯度跟踪
+#     with torch.no_grad():
+#         for uid, eps in list(eval_data.items())[:100]:
+#             for i in range(len(eps) - 1):  # car_id, 是否中标, 出价金额, 出价时间
+#                 input_item_id = eps[i][0]
+#                 gold_item_id = eps[i + 1][0]
+#
+#                 _, _, _, reward = actor.choose_action(cur_item_id=input_item_id,
+#                                                       gold_item_id=gold_item_id,
+#                                                       user_id=uid)
+#                 total_reward += reward
+#     end = time.time()
+#     print(f"epoch:{epoch}  total reward:{total_reward}  time:{round((end-start)/60, 2)}" )
