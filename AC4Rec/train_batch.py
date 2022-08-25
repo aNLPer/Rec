@@ -37,7 +37,7 @@ DATA_PATH = '../dataset/filtered_data.csv'
 BATCH_SIZE = 32
 BATCH_SIZE_ = 32
 GAMMA = 0.9
-LR = 5e-3
+LR = 5e-4
 # ITEM_DIM == USER_DIM == BUDGET_DIM
 ITEM_DIM = 256
 USER_DIM = 256
@@ -140,7 +140,7 @@ class Actor(object):
             item_action_dist = action_distribution(budgets[i], len(self.budget_blocks[selected_budget_block_ids[i]]), self.item_policys, prob=selected_budget_block_probs[i])
             item_action_dist = torch.concat(item_action_dist, dim=0).unsqueeze(dim=0)
             if item_action_dist.shape[1]<BLOCK_SIZE:
-                item_action_dist = torch.concat([item_action_dist, torch.zeros([1,BLOCK_SIZE-item_action_dist.shape[1]])], dim=1)
+                item_action_dist = torch.concat([item_action_dist, torch.zeros([1,BLOCK_SIZE-item_action_dist.shape[1]]).to(device)], dim=1)
             item_action_dists.append(item_action_dist)
         item_action_dists = torch.concat(item_action_dists, dim=0)
 
@@ -298,7 +298,6 @@ for epoch in range(EPOCH):
             actor.learn(selected_item_ids, item_action_dists, td_error)
             # true_gradient = grad[logPi(a|s) * td_error]
             # 然后根据前面学到的V（s）值，训练actor，以更好地采样动作
-        print("batch")
     total_reward = 0
     # 设置模型为训练状态
     for p in actor.item_policys:
