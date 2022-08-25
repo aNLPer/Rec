@@ -121,6 +121,7 @@ class Actor(object):
         selected_budget_block_probs =[budget_blocks_dists[key][value] for key, value in enumerate(selected_budget_block_ids)]
 
         # 根据budgets选择item
+        select_item_time_start = time.time()
         selected_item_ids =[]
         selected_item_probs = []
         for i in range(BATCH_SIZE_):
@@ -129,12 +130,14 @@ class Actor(object):
                                                                  self.item_policys)
             selected_item_ids.append(selected_item_id)
             selected_item_probs.append(selected_item_prob)
-
+        select_item_time_end = time.time()
+        print(f"select_item_time: {select_item_time_end-select_item_time_start}")
 
 
         self.item_action_memory.append(selected_item_ids)
 
         # 计算item_action的概率分布
+        cal_item_action_dists_time_start = time.time()
         item_action_dists = []
         for i in range(BATCH_SIZE_):
             item_action_dist = action_distribution(budgets[i], len(self.budget_blocks[selected_budget_block_ids[i]]), self.item_policys, prob=selected_budget_block_probs[i])
@@ -143,7 +146,8 @@ class Actor(object):
                 item_action_dist = torch.concat([item_action_dist, torch.zeros([1,BLOCK_SIZE-item_action_dist.shape[1]]).to(device)], dim=1)
             item_action_dists.append(item_action_dist)
         item_action_dists = torch.concat(item_action_dists, dim=0)
-
+        cal_item_action_dists_time_end = time.time()
+        print(f"cal_item_action_dists_time: {cal_item_action_dists_time_end-cal_item_action_dists_time_start}")
         # 根据预测出来item和gold_item的相似度(这里选择的是价格差)设计reward。
         reward = 0
         selected_item_prices = [self.budget_blocks[selected_budget_block_ids[i]][selected_item_ids[i]][1] for i in range(BATCH_SIZE)]
@@ -260,7 +264,7 @@ actor = Actor(user_num=dp.userVoc.num_words,
 
 critic = Critic(input_dim=BUDGET_DIM)
 
-train_data, eval_data = data_split(dp.seq, rate=0.8)
+train_data, eval_data = data_split(dp.seq, train_rate=0.8)
 
 for epoch in range(EPOCH):
     # 设置模型为训练状态
@@ -270,7 +274,7 @@ for epoch in range(EPOCH):
     actor.budget_policys.train()
     actor.budget_net.train()
     critic.network.train()
-    for uids, seqs in data_loader(dp.seq, BATCH_SIZE):
+    for uids, seqs in data_loader(train_data, BATCH_SIZE):
         BATCH_SIZE_ = len(uids)
         # 清空memory
         actor.item_action_memory = []
@@ -283,21 +287,27 @@ for epoch in range(EPOCH):
             inputs = input_item_ids[:, i]
             golden = golden_item_ids[:, i]
 
+            action_choose_time_start = time.time()
             budgets, item_action_dists, selected_item_ids, reward = actor.choose_action(cur_item_ids=inputs,
                                                                              golden_item_ids=golden,
                                                                              user_ids=uids)
+            actopm_choose_time_end = time.time()
+            print(f"action_choose_time{time.time()-action_choose_time_start}")
 
             with torch.no_grad():
                 next_budgets = actor.budget_net(selected_item_ids, golden, uids)
 
+            network_update_time = time.time()
             td_error = critic.train_Q_network(
                 budgets.clone().detach(),
                 reward,
                 next_budgets)
 
             actor.learn(selected_item_ids, item_action_dists, td_error)
+            print(f"network_update_time: {time.time()-network_update_time}")
             # true_gradient = grad[logPi(a|s) * td_error]
             # 然后根据前面学到的V（s）值，训练actor，以更好地采样动作
+        print("processed one batch")
     total_reward = 0
     # 设置模型为训练状态
     for p in actor.item_policys:
@@ -307,7 +317,7 @@ for epoch in range(EPOCH):
     critic.network.eval()
     # 取消梯度跟踪
     with torch.no_grad():
-        for uids, seqs in data_loader(dp.seq, BATCH_SIZE):
+        for uids, seqs in data_loader(eval_data, BATCH_SIZE):
             BATCH_SIZE_ = len(uids)
             # 清空memory
             actor.item_action_memory = []

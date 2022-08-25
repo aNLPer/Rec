@@ -167,15 +167,15 @@ def item_split(items_price, step):
         splited_item.append([items_price[i] for i in ids])
     return splited_item
 
-def data_split(data, rate=0.8):
+def data_split(data, train_rate=0.6):
     train_data = {}
-    eval_data = {}
+    valid_data = {}
     for key, value in data.items():
-        if len(value)*rate < 2 or len(value)*(1-rate) < 2:
+        if len(value)*train_rate < 2 or len(value)*(1-train_rate) < 2:
             pass
-        train_data[key] = value[:int(len(value)*rate)]
-        eval_data[key] = value[int(len(value)*rate):]
-    return train_data, eval_data
+        train_data[key] = value[:int(len(value)*train_rate)]
+        valid_data[key] = value[int(len(value)*train_rate):]
+    return train_data, valid_data
 
 # 选择 action 计算对应的概率
 def action_select(state, action_num, policys):
