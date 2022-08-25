@@ -274,7 +274,9 @@ for epoch in range(EPOCH):
     actor.budget_policys.train()
     actor.budget_net.train()
     critic.network.train()
+
     for uids, seqs in data_loader(train_data, BATCH_SIZE):
+        batch_time = time.time()
         BATCH_SIZE_ = len(uids)
         # 清空memory
         actor.item_action_memory = []
@@ -307,7 +309,8 @@ for epoch in range(EPOCH):
             print(f"network_update_time: {time.time()-network_update_time}")
             # true_gradient = grad[logPi(a|s) * td_error]
             # 然后根据前面学到的V（s）值，训练actor，以更好地采样动作
-        print("processed one batch")
+
+        print(f"processed one batch time: {time.time()-batch_time}")
     total_reward = 0
     # 设置模型为训练状态
     for p in actor.item_policys:
