@@ -12,7 +12,7 @@ import torch.nn.functional as F
 import torch.utils.data
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
 from torch.distributions import Categorical
-from AC4Rec.utils_batch import DataPre, Voc, data_split, Policy, BudgetNet, item_split, action_select, action_distribution, data_loader, pad_and_cut, BudgetPolicy, category_sampling
+from AC4Rec.utils_multiUser import DataPre, Voc, data_split, Policy, BudgetNet, item_split, action_select, action_distribution, data_loader, pad_and_cut, BudgetPolicy, category_sampling
 
 # # data prepare
 # df = pd.read_csv('../dataset/filtered_data.csv')
@@ -116,10 +116,11 @@ class Actor(object):
 
         # 根据budget选择budget_block
         # [batch_size, block_num]
+        budgets_select_time = time.time()
         budget_blocks_dists = self.budget_policys(budgets)
         selected_budget_block_ids = list(map(category_sampling,budget_blocks_dists))
         selected_budget_block_probs =[budget_blocks_dists[key][value] for key, value in enumerate(selected_budget_block_ids)]
-
+        print(f"budget_blocks_select_time:{time.time()-budgets_select_time}\n")
         # 根据budgets选择item
         select_item_time_start = time.time()
         selected_item_ids =[]
@@ -131,7 +132,7 @@ class Actor(object):
             selected_item_ids.append(selected_item_id)
             selected_item_probs.append(selected_item_prob)
         select_item_time_end = time.time()
-        print(f"select_item_time: {select_item_time_end-select_item_time_start}")
+        print(f"select_item_time: {select_item_time_end-select_item_time_start}\n")
 
 
         self.item_action_memory.append(selected_item_ids)
@@ -147,7 +148,7 @@ class Actor(object):
             item_action_dists.append(item_action_dist)
         item_action_dists = torch.concat(item_action_dists, dim=0)
         cal_item_action_dists_time_end = time.time()
-        print(f"cal_item_action_dists_time: {cal_item_action_dists_time_end-cal_item_action_dists_time_start}")
+        print(f"cal_item_action_dists_time: {cal_item_action_dists_time_end-cal_item_action_dists_time_start}\n")
         # 根据预测出来item和gold_item的相似度(这里选择的是价格差)设计reward。
         reward = 0
         selected_item_prices = [self.budget_blocks[selected_budget_block_ids[i]][selected_item_ids[i]][1] for i in range(BATCH_SIZE)]
@@ -294,7 +295,7 @@ for epoch in range(EPOCH):
                                                                              golden_item_ids=golden,
                                                                              user_ids=uids)
             actopm_choose_time_end = time.time()
-            print(f"action_choose_time{time.time()-action_choose_time_start}")
+            print(f"action_choose_time{time.time()-action_choose_time_start}\n")
 
             with torch.no_grad():
                 next_budgets = actor.budget_net(selected_item_ids, golden, uids)
@@ -306,11 +307,10 @@ for epoch in range(EPOCH):
                 next_budgets)
 
             actor.learn(selected_item_ids, item_action_dists, td_error)
-            print(f"network_update_time: {time.time()-network_update_time}")
+            print(f"network_update_time: {time.time()-network_update_time}\n")
             # true_gradient = grad[logPi(a|s) * td_error]
             # 然后根据前面学到的V（s）值，训练actor，以更好地采样动作
-
-        print(f"processed one batch time: {time.time()-batch_time}")
+        print(f"processed one batch time: {time.time()-batch_time}\n")
     total_reward = 0
     # 设置模型为训练状态
     for p in actor.item_policys:

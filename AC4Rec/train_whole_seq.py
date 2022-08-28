@@ -12,7 +12,7 @@ import torch.nn.functional as F
 import torch.utils.data
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
 from torch.distributions import Categorical
-from AC4Rec.utils import DataPre, Voc, data_split, Policy, BudgetNet, item_split, action_select, action_distribution, data_loader, pad_and_cut, BudgetPolicy, category_sampling
+from AC4Rec.utils_whole_seq import DataPre, Voc, data_split, Policy, BudgetNet, item_split, action_select, action_distribution, data_loader, pad_and_cut, BudgetPolicy, category_sampling
 
 # # data prepare
 # df = pd.read_csv('../dataset/filtered_data.csv')
@@ -59,12 +59,10 @@ class Actor(object):
         self.item_dim = item_dim
         self.item_price = item_price  # sorted [(item_id, item_price),(),......]
         self.user_budget = user_budegt  # user budgets
-        self.budget_blocks_action_memory = None
-        self.item_action_memory = []
         self.budget_blocks = budget_blocks
 
-        self.budget_policys = BudgetPolicy(input_dim=BUDGET_DIM, output_dim=BLOCK_NUM).to(device)
-        self.item_policys = None
+        self.budget_policy = BudgetPolicy(input_dim=BUDGET_DIM, output_dim=BLOCK_NUM).to(device)
+        self.item_policy = None
         self.genPolicys()
 
         # 根据state生成budgets
@@ -235,7 +233,8 @@ actor = Actor(user_num=dp.userVoc.num_words,
 
 critic = Critic(input_dim=BUDGET_DIM)
 
-train_data, eval_data = data_split(dp.seq, rate=0.5)
+train_data, eval_data = data_split(dp.seq, rate=0.8)
+
 
 # 训练
 for epoch in range(EPOCH):

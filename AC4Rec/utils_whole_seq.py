@@ -165,11 +165,11 @@ def item_split(items_price, step):
         splited_item.append([items_price[i] for i in ids])
     return splited_item
 
-def data_split(data, rate=0.5):
+def data_split(data, rate=0.8):
     train_data = {}
     eval_data = {}
     for key, value in data.items():
-        if len(value)*rate < 5:
+        if len(value)*rate < 2 or len(value)*(1-rate) < 2:
             pass
         train_data[key] = value[:int(len(value)*rate)]
         eval_data[key] = value[int(len(value)*rate):]
