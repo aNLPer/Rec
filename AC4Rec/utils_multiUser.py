@@ -98,13 +98,40 @@ class BudgetPolicy(nn.Module):
         out = self.fc(input)
         return out
 
-class Policy(nn.Module):
-    def __init__(self, input_dim):
-        super(Policy, self).__init__()
+class ItemPolicy(nn.Module):
+    def __init__(self, input_dim, output_dim, block_num):
+        super(ItemPolicy, self).__init__()
+        self.block_em = nn.Embedding(block_num, input_dim).to(device)
         self.fc = nn.Sequential(
-            nn.Linear(input_dim, int(0.5 * input_dim)),
+            nn.Linear(input_dim, output_dim),
+            nn.ReLU()
+        )
+    def forward(self, input, selected_block_ids, block_num, block_size, tail_block_size):
+        """
+        :param input: [batch_size, block_dim]
+        :param selected_block_ids: [batch_size]
+        :param block_num: [BLOCK_NUM]
+        :param block_size: [BLOCK_SIZE]
+        :param tail_block_size: [TAIL_BLOCK_SIZE]
+        :return:
+        """
+        input = input + self.block_em(torch.tensor(selected_block_ids)).to(device)
+        out = self.fc(input)
+        mask = [[0]*block_size for _ in range(len(selected_block_ids))]
+        for idx,id in enumerate(selected_block_ids):
+            if id == block_num-1: # 选中的是最后一个block
+                mask[idx] = [0 if i < tail_block_size else float("-inf") for i in range(block_size)]
+        mask = torch.tensor(mask, dtype=torch.float32)
+        out = mask + out
+        out = torch.softmax(out, dim=1)
+        return out
+
+class BlockPolicy(nn.Module):
+    def __init__(self, input_dim, output_dim):
+        super(BlockPolicy, self).__init__()
+        self.fc = nn.Sequential(
+            nn.Linear(input_dim, output_dim),
             nn.ReLU(),
-            nn.Linear(int(0.5 * input_dim), 2),
             nn.Softmax()
         )
     def forward(self, input):
@@ -114,6 +141,8 @@ class Policy(nn.Module):
         """
         out = self.fc(input)
         return out
+
+
 # 预测用户的budget
 class BudgetNet(nn.Module):
     # 以用户embedding初始化h_0
@@ -135,7 +164,7 @@ class BudgetNet(nn.Module):
             nn.Linear(int(0.5*gru_hidden_size), budget_dim)
         )
 
-    def forward(self, pre_item_id, cur_item_id, user_id):
+    def forward(self, cur_item_id, user_id):
         """
         """
         # [batch_size, user_dim]
@@ -143,16 +172,9 @@ class BudgetNet(nn.Module):
         # [batch_size, item_dim]
         cur_item_em = self.item_em(torch.LongTensor(cur_item_id).to(device))
 
-        if pre_item_id is not None:
-            # [batch_size, item_dim]
-            pre_item_em = self.item_em(torch.LongTensor(pre_item_id).to(device))
-            item_em = cur_item_em + pre_item_em
-        else:
-            # [batch_size, item_dim]
-            item_em = cur_item_em
         # 初始化隐藏状态
         # [batch_size, gru_hidden_size]
-        out = self.gru(item_em)
+        out = self.gru(cur_item_em)
         # [batch_size, budget_dim]
         budget_pred = self.fc(out)
         # [batch_size, budget_dim]
@@ -276,9 +298,7 @@ def pad_and_cut(data, length):
 
 
 if __name__=="__main__":
-    a = [1,3,2]
-    provide_prices = [1,3,2]
-    provide_prices.remove(max(provide_prices))
-    provide_prices.remove(min(provide_prices))
-    print(provide_prices)
+    a = [[0]*5 for i in range(2)]
+    a[0] = [1]*10
+    print(a)
 

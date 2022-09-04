@@ -1,12 +1,11 @@
+import torch
 import numpy as np
 import torch.nn as nn
-import torch
-import math
-import heapq
-import random
 from torch.distributions import Categorical
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cpu")
 
 class Voc:
     def __init__(self, sentence=False):
@@ -83,13 +82,17 @@ class DataPre:
             #     userBudgets[key] = int(sum(provide_prices)/len(provide_prices))
         self.userBudgets = userBudgets
 
-class BudgetPolicy(nn.Module):
+# 根据budget选择budget-block
+class BlockPolicy(nn.Module):
+
     def __init__(self, input_dim, output_dim):
-        super(BudgetPolicy, self).__init__()
+        super(BlockPolicy, self).__init__()
         self.fc = nn.Sequential(
             nn.Linear(input_dim, output_dim),
+            nn.ReLU(),
             nn.Softmax()
         )
+
     def forward(self, input):
         """
         根据当前状态
@@ -98,15 +101,16 @@ class BudgetPolicy(nn.Module):
         out = self.fc(input)
         return out
 
-class Policy(nn.Module):
-    def __init__(self, input_dim):
-        super(Policy, self).__init__()
+# 根据budget选择item
+class ItemPolicy(nn.Module):
+    def __init__(self, input_dim, output_dim):
+        super(ItemPolicy, self).__init__()
         self.fc = nn.Sequential(
-            nn.Linear(input_dim, int(0.5 * input_dim)),
+            nn.Linear(input_dim, output_dim),
             nn.ReLU(),
-            nn.Linear(int(0.5 * input_dim), 2),
             nn.Softmax()
         )
+
     def forward(self, input):
         """
         根据当前状态
@@ -114,6 +118,7 @@ class Policy(nn.Module):
         """
         out = self.fc(input)
         return out
+
 # 预测用户的budget
 class BudgetNet(nn.Module):
     # 以用户embedding初始化h_0
@@ -274,7 +279,6 @@ def pad_and_cut(data, length):
 
 
 if __name__=="__main__":
-    a = torch.tensor([[1,2,3]], dtype=torch.float32, requires_grad=True)
-    b = torch.tensor([[0,0,0]])
-    c = torch.concat([a,b],dim=1)
-    print("end")
+    t = torch.tensor([[1,2,3,4,5],[1,2,3,4,5]], dtype=torch.float32, requires_grad=True)
+    s = torch.tensor([[1],[2]], dtype=torch.float32, requires_grad=True)
+    print(t*s)

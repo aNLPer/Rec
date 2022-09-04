@@ -12,25 +12,23 @@ import torch.nn.functional as F
 import torch.utils.data
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
 from torch.distributions import Categorical
-from AC4Rec.utils import DataPre, Voc, data_split, Policy, BudgetNet, item_split, action_select, action_distribution, data_loader, pad_and_cut, BudgetPolicy, category_sampling
+from AC4Rec.utils import DataPre, Voc, data_split, ItemPolicy, BudgetNet, item_split, action_select, action_distribution, data_loader, pad_and_cut, BlockPolicy, category_sampling
 
 # # data prepare
-# df = pd.read_csv('../dataset/filtered_data.csv')
-# basetime = datetime.datetime.strptime(df['出价时间'].min(), '%Y-%m-%d')
-# # 将出价时间设置为与basetime的差
-# df['出价时间'] = df['出价时间'].apply(lambda x: (datetime.datetime.strptime(x, '%Y-%m-%d') - basetime).days)
-#
-# dp = DataPre(df)
-#
-# f = open("./dp.pkl", "wb")
-# pickle.dump(dp, f)
-# f.close()
+# # df = pd.read_csv('../dataset/filtered_data.csv')
+# # basetime = datetime.datetime.strptime(df['出价时间'].min(), '%Y-%m-%d')
+# # # 将出价时间设置为与basetime的差
+# # df['出价时间'] = df['出价时间'].apply(lambda x: (datetime.datetime.strptime(x, '%Y-%m-%d') - basetime).days)
+# #
+# # dp = DataPre(df)
+# #
+# # f = open("./dp.pkl", "wb")
+# # pickle.dump(dp, f)
+# # f.close()
 
 print("loading dataset...")
 with open("./dp.pkl", "rb") as f:
     dp = pickle.load(f)
-
-
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 DATA_PATH = '../dataset/filtered_data.csv'
@@ -45,57 +43,46 @@ GRU_HIDDEN_SIZE = 512
 EPOCH = 30
 BLOCK_SIZE = 256
 BLOCK_NUM = math.ceil(dp.itemVoc.num_words/BLOCK_SIZE)
-
+BLOCK_DIM = 256
 print("split budgets...")
 item_price = list(enumerate(dp.itemPrice))
 item_price.sort(key=lambda x: x[1])
 budget_blocks = item_split(item_price, BLOCK_SIZE)
+TAIL_BLOCK_SIZE = len(budget_blocks[-1])
+
+
 
 class Actor(object):
-    def __init__(self,user_num, user_dim, item_num, item_dim, item_price, user_budegt, budget_blocks):
-        self.user_num = user_num
-        self.user_dim = user_dim
-        self.item_num = item_num
-        self.item_dim = item_dim
+    def __init__(self,item_price, user_budegt, budget_blocks):
         self.item_price = item_price  # sorted [(item_id, item_price),(),......]
         self.user_budget = user_budegt  # user budgets
-        self.budget_blocks_action_memory = None
-        self.item_action_memory = []
         self.budget_blocks = budget_blocks
+        self.item_action_memory = []
 
-        self.budget_policys = BudgetPolicy(input_dim=BUDGET_DIM, output_dim=BLOCK_NUM).to(device)
-        self.item_policys = None
-        self.genPolicys()
+        # 为每一个block使用一个嵌入向量
+        self.block_em = nn.Embedding(BLOCK_NUM, BLOCK_DIM)
 
         # 根据state生成budgets
         self.budget_net = BudgetNet(
-            user_num=self.user_num,
-            user_dim=user_dim,
-            item_num = item_num,
-            item_dim = item_dim,
+            user_num=dp.userVoc.num_words,
+            user_dim=USER_DIM,
+            item_num=dp.itemVoc.num_words,
+            item_dim=ITEM_DIM,
             budget_dim=BUDGET_DIM,
             gru_hidden_size=GRU_HIDDEN_SIZE).to(device)
 
+        # 根据budget选择block
+        self.block_policy = BlockPolicy(input_dim=BUDGET_DIM, output_dim=BLOCK_NUM).to(device)
+        # 根据选择的block和budget选择item
+        self.item_policy = ItemPolicy(input_dim=BUDGET_DIM, block_dim = BLOCK_DIM, output_dim=BLOCK_SIZE)
+        self.tail_item_policy = ItemPolicy(input_dim=BUDGET_DIM, block_dim=BLOCK_DIM, output_dim=TAIL_BLOCK_SIZE)
+
         # 优化器
         # self.budget_policy_optim = torch.optim.Adam([{"params":net.parameters()} for net in self.budget_policys], lr=LR, weight_decay=0.05)
-        self.budget_policy_optim = torch.optim.Adam(self.budget_policys.parameters(), lr=LR, weight_decay=0.05)
+        self.budget_policy_optim = torch.optim.Adam(self.budget_policy.parameters(), lr=LR, weight_decay=0.05)
         self.budget_net_optim = torch.optim.Adam(self.budget_net.parameters(), lr=LR, weight_decay=0.05)
         self.item_policy_optim = torch.optim.Adam([{"params":net.parameters()} for net in self.item_policys], lr=LR, weight_decay=0.05)
 
-    def genPolicys(self):
-        # budget_policys = []
-        item_policys = []
-
-        # 按照BLOCK_NUM的大小生成budget范围选择策略网络
-        # for i in range(math.ceil(math.log(BLOCK_NUM, 2))):
-        #     budget_policys.append(Policy(BUDGET_DIM).to(device))
-
-        # 按照BLOCK_SIZE大小生成item选择策略网络
-        for i in range(math.ceil(math.log(BLOCK_SIZE, 2))):
-            item_policys.append(Policy(BUDGET_DIM).to(device))
-
-        # self.budget_policys = budget_policys
-        self.item_policys = item_policys
 
     def choose_action(self, cur_item_id, gold_item_id, user_id):
         # 估计用户的预算  [budget_dim]
@@ -103,16 +90,20 @@ class Actor(object):
             pre_item_id = self.item_action_memory[-1]
         else:
             pre_item_id = None
+
         budget = self.budget_net(pre_item_id, cur_item_id, user_id)
 
         # 根据budget选择budget_block
-        # selected_budget_block_id, selected_budget_block_prob = action_select(budget, len(self.budget_blocks), self.budget_policys)
-        # self.budget_blocks_action_memory.append(selected_budget_block_id)
-        budget_blocks_dist = self.budget_policys(budget)
+        budget_blocks_dist = self.block_policy(budget)
         selected_budget_block_id = category_sampling(budget_blocks_dist)
         selected_budget_block_prob = budget_blocks_dist[0][selected_budget_block_id]
 
         # 根据budgets选择item
+        if selected_budget_block_id == len(self.budget_blocks)-1: # 选择了最后一个budgets_block
+            self.tail_item_policy()
+        else:
+            self.item_policy()
+
         selected_item_id, selected_item_prob = action_select(budget, len(self.budget_blocks[selected_budget_block_id]), self.item_policys)
         self.item_action_memory.append(selected_item_id)
 
@@ -229,6 +220,8 @@ actor = Actor(user_num=dp.userVoc.num_words,
               user_dim=USER_DIM,
               item_num=dp.itemVoc.num_words,
               item_dim=ITEM_DIM,
+              block_num=BLOCK_NUM,
+              block_dim=BUDGET_DIM,
               item_price=dp.itemPrice,
               user_budegt=dp.userBudgets,
               budget_blocks=budget_blocks)
