@@ -157,6 +157,7 @@ class GRU4Rec(nn.Module):
 
 
 def evaluation(model, input_x, output_y, seq_len, K):
+    # map, mrr, hit, ndcg
     mrr = 0.
     hit_n = [0] * K
 
