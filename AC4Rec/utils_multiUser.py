@@ -6,8 +6,8 @@ import heapq
 import random
 from torch.distributions import Categorical
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cpu")
 class Voc:
     def __init__(self, sentence=False):
         self.word2index = {}
@@ -88,6 +88,8 @@ class BudgetPolicy(nn.Module):
         super(BudgetPolicy, self).__init__()
         self.fc = nn.Sequential(
             nn.Linear(input_dim, output_dim),
+            nn.BatchNorm1d(output_dim),
+            nn.ReLU(),
             nn.Softmax()
         )
     def forward(self, input):
@@ -104,6 +106,7 @@ class ItemPolicy(nn.Module):
         self.block_em = nn.Embedding(block_num, input_dim).to(device)
         self.fc = nn.Sequential(
             nn.Linear(input_dim, output_dim),
+            nn.BatchNorm1d(output_dim),
             nn.ReLU()
         )
     def forward(self, input, selected_block_ids, block_num, block_size, tail_block_size):
@@ -117,12 +120,12 @@ class ItemPolicy(nn.Module):
         """
         input = input + self.block_em(torch.tensor(selected_block_ids)).to(device)
         out = self.fc(input)
-        mask = [[0]*block_size for _ in range(len(selected_block_ids))]
-        for idx,id in enumerate(selected_block_ids):
-            if id == block_num-1: # 选中的是最后一个block
-                mask[idx] = [0 if i < tail_block_size else float("-inf") for i in range(block_size)]
-        mask = torch.tensor(mask, dtype=torch.float32)
-        out = mask + out
+        # mask = [[0]*block_size for _ in range(len(selected_block_ids))]
+        # for idx,id in enumerate(selected_block_ids):
+        #     if id == block_num-1: # 选中的是最后一个block
+        #         mask[idx] = [0 if i < tail_block_size else float("-inf") for i in range(block_size)]
+        # mask = torch.tensor(mask, dtype=torch.float32)
+        # out = mask + out
         out = torch.softmax(out, dim=1)
         return out
 
@@ -131,6 +134,7 @@ class BlockPolicy(nn.Module):
         super(BlockPolicy, self).__init__()
         self.fc = nn.Sequential(
             nn.Linear(input_dim, output_dim),
+            nn.BatchNorm1d(output_dim),
             nn.ReLU(),
             nn.Softmax()
         )
@@ -141,7 +145,6 @@ class BlockPolicy(nn.Module):
         """
         out = self.fc(input)
         return out
-
 
 # 预测用户的budget
 class BudgetNet(nn.Module):
@@ -189,7 +192,7 @@ def item_split(items_price, step):
         splited_item.append([items_price[i] for i in ids])
     return splited_item
 
-def data_split(data, train_rate=0.6):
+def data_split(data, train_rate=0.5):
     train_data = {}
     valid_data = {}
     for key, value in data.items():
@@ -298,7 +301,6 @@ def pad_and_cut(data, length):
 
 
 if __name__=="__main__":
-    a = [[0]*5 for i in range(2)]
-    a[0] = [1]*10
+    a = [(-1, float("inf"))]*10
     print(a)
 

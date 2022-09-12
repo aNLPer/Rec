@@ -5,6 +5,7 @@ import math
 import time
 import json
 import numpy as np
+np.warnings.filterwarnings('ignore', category=np.VisibleDeprecationWarning)
 import pandas as pd
 import torch
 import torch.nn as nn
@@ -32,28 +33,29 @@ with open("./dp.pkl", "rb") as f:
 
 
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cpu")
+
 DATA_PATH = '../dataset/filtered_data.csv'
-BATCH_SIZE = 32
-BATCH_SIZE_ = 32
+BATCH_SIZE = 128
 GAMMA = 0.9
-LR = 0
+LR = 1e-3
 # ITEM_DIM == USER_DIM == BUDGET_DIM
 ITEM_DIM = 512
 USER_DIM = 512
 BUDGET_DIM = 512
 BLOCK_DIM = 512
 GRU_HIDDEN_SIZE = 512
-EPOCH = 30
+EPOCH = 400
 BLOCK_SIZE = 256
 BLOCK_NUM = math.ceil(dp.itemVoc.num_words/BLOCK_SIZE)
-
+TAIL_BLOCK_SIZE = dp.itemVoc.num_words % BLOCK_SIZE
 
 print("split budgets...")
 item_price = list(enumerate(dp.itemPrice))
 item_price.sort(key=lambda x: x[1])
+item_price.extend([(-1, float("inf"))]*(BLOCK_SIZE-TAIL_BLOCK_SIZE))
 budget_blocks = item_split(item_price, BLOCK_SIZE)
-TAIL_BLOCK_SIZE = len(budget_blocks[-1])
 
 class Actor(object):
     def __init__(self,user_num, user_dim, item_num, item_dim, item_price, user_budegt, budget_blocks):
@@ -115,6 +117,8 @@ class Actor(object):
         # 根据budget选择budget_block
         # [batch_size, block_num]
         blocks_dists = self.blockPolicy(budgets)
+        # for p in self.blockPolicy.parameters():
+        #     print(p)
         # print(blocks_dists)
         selected_block_ids = list(map(category_sampling, blocks_dists))
         selected_block_probs =[blocks_dists[key][value].unsqueeze(dim=0) for key, value in enumerate(selected_block_ids)]
@@ -129,14 +133,13 @@ class Actor(object):
         reward = 0
         selected_item_prices = [self.budget_blocks[selected_block_ids[i]][selected_item_ids[i]][1] for i in range(len(selected_item_ids))]
         user_budgets = [self.user_budget[user_id] for user_id in user_ids]
-        for i in range(BATCH_SIZE_):
+        for i in range(len(selected_item_ids)):
             if self.budget_blocks[selected_block_ids[i]][selected_item_ids[i]][0] == golden_item_ids[i]:
-                reward += 0.01
+                reward += 0.1
             elif selected_item_prices[i] < user_budgets[i][1] and selected_item_prices[i]>user_budgets[i][0]:
-                reward += 0.005
-            # else:
-            #     reward -= 0.01
-
+                reward += 0.05
+            else:
+                reward -= 0.05
         return budgets, item_dists, selected_item_ids, reward
 
     def learn(self,item_id, item_dist, td_error):
@@ -238,18 +241,17 @@ actor = Actor(user_num=dp.userVoc.num_words,
 
 critic = Critic(input_dim=BUDGET_DIM)
 
-train_data, eval_data = data_split(dp.seq, train_rate=0.8)
+train_data, eval_data = data_split(dp.seq, train_rate=0.5)
 
 for epoch in range(EPOCH):
-    start = time.time()
+    epoch_time = time.time()
     # 设置模型为训练状态
     actor.budget_net.train()
     actor.blockPolicy.train()
     actor.itemPolicy.train()
     critic.network.train()
-
     for uids, seqs in data_loader(train_data, BATCH_SIZE):
-        batch_time = time.time()
+
         # BATCH_SIZE_ = len(uids)
         # 清空memory
         actor.item_action_memory = []
@@ -262,39 +264,35 @@ for epoch in range(EPOCH):
             inputs = input_item_ids[:, i]
             golden = golden_item_ids[:, i]
 
-            action_choose_time_start = time.time()
+            # action_choose_time_start = time.time()
             budgets, item_action_dists, selected_item_ids, reward = actor.choose_action(cur_item_ids=inputs,
                                                                              golden_item_ids=golden,
                                                                              user_ids=uids)
-            print(f"action_choose_time{time.time()-action_choose_time_start}\n")
+
+            # print(f"action_choose_time{time.time()-action_choose_time_start}\n")
 
             with torch.no_grad():
                 next_budgets = actor.budget_net(selected_item_ids, uids)
 
-            network_update_time = time.time()
+            # network_update_time = time.time()
             td_error = critic.train_Q_network(
                 budgets.clone().detach(),
                 reward,
                 next_budgets)
 
             actor.learn(selected_item_ids, item_action_dists, td_error)
-            print(f"network_update_time: {time.time()-network_update_time}\n")
+            # print(f"network_update_time: {time.time()-network_update_time}\n")
             # true_gradient = grad[logPi(a|s) * td_error]
             # 然后根据前面学到的V（s）值，训练actor，以更好地采样动作
-        print(f"processed one batch time: {time.time()-batch_time}\n")
     total_reward = 0
     # 设置模型为训练状态
-    for p in actor.item_policys:
-        p.eval()
-    actor.budget_policys.eval()
     actor.budget_net.eval()
+    actor.blockPolicy.eval()
+    actor.itemPolicy.eval()
     critic.network.eval()
     # 取消梯度跟踪
     with torch.no_grad():
-        for uids, seqs in data_loader(eval_data, BATCH_SIZE):
-            # BATCH_SIZE_ = len(uids)
-            # 清空memory
-            actor.item_action_memory = []
+        for uids, seqs in data_loader(eval_data, 5*BATCH_SIZE):
             # 裁剪seq
             min_length = min([len(s) for s in seqs])
             seqs = pad_and_cut(np.array(seqs), min_length)
@@ -304,14 +302,11 @@ for epoch in range(EPOCH):
                 inputs = input_item_ids[:, i]
                 golden = golden_item_ids[:, i]
 
+                # action_choose_time_start = time.time()
                 budgets, item_action_dists, selected_item_ids, reward = actor.choose_action(cur_item_ids=inputs,
                                                                                             golden_item_ids=golden,
                                                                                             user_ids=uids)
 
-                total_reward+=reward
-                # true_gradient = grad[logPi(a|s) * td_error]
-                # 然后根据前面学到的V（s）值，训练actor，以更好地采样动作
-                print(total_reward)
-    end = time.time()
-    print(f"epoch:{epoch}  total reward:{total_reward}  time:{round((end - start) / 60, 2)}")
+                total_reward += reward
+    print(f"epoch:{epoch}  total reward:{total_reward}  time:{round((time.time() - epoch_time) / 60, 2) }min\n")
 

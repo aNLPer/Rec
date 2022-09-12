@@ -6,8 +6,8 @@ import heapq
 import random
 from torch.distributions import Categorical
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cpu")
 class Voc:
     def __init__(self, sentence=False):
         self.word2index = {}
