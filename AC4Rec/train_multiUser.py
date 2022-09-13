@@ -14,6 +14,8 @@ import torch.utils.data
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
 from torch.distributions import Categorical
 from AC4Rec.utils_multiUser import DataPre, Voc, data_split, BlockPolicy, ItemPolicy, BudgetNet, item_split, action_select, action_distribution, data_loader, pad_and_cut, BudgetPolicy, category_sampling
+from sklearn.metrics._ranking import label_ranking_average_precision_score
+
 
 # # data prepare
 # df = pd.read_csv('../dataset/filtered_data.csv')
@@ -36,6 +38,7 @@ with open("./dp.pkl", "rb") as f:
 # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 device = torch.device("cpu")
 
+TOPN = 10
 DATA_PATH = '../dataset/filtered_data.csv'
 BATCH_SIZE = 128
 GAMMA = 0.9
@@ -140,7 +143,7 @@ class Actor(object):
                 reward += 0.05
             else:
                 reward -= 0.05
-        return budgets, item_dists, selected_item_ids, reward
+        return budgets, item_dists, selected_item_ids, reward, selected_block_ids
 
     def learn(self,item_id, item_dist, td_error):
 
@@ -241,7 +244,7 @@ actor = Actor(user_num=dp.userVoc.num_words,
 
 critic = Critic(input_dim=BUDGET_DIM)
 
-train_data, eval_data = data_split(dp.seq, train_rate=0.5)
+train_data, valid_data, test_data = data_split(dp.seq)
 
 for epoch in range(EPOCH):
     epoch_time = time.time()
@@ -265,7 +268,7 @@ for epoch in range(EPOCH):
             golden = golden_item_ids[:, i]
 
             # action_choose_time_start = time.time()
-            budgets, item_action_dists, selected_item_ids, reward = actor.choose_action(cur_item_ids=inputs,
+            budgets, item_action_dists, selected_item_ids, reward, _ = actor.choose_action(cur_item_ids=inputs,
                                                                              golden_item_ids=golden,
                                                                              user_ids=uids)
 
@@ -292,7 +295,7 @@ for epoch in range(EPOCH):
     critic.network.eval()
     # 取消梯度跟踪
     with torch.no_grad():
-        for uids, seqs in data_loader(eval_data, 5*BATCH_SIZE):
+        for uids, seqs in data_loader(valid_data, 8444):
             # 裁剪seq
             min_length = min([len(s) for s in seqs])
             seqs = pad_and_cut(np.array(seqs), min_length)
@@ -303,7 +306,7 @@ for epoch in range(EPOCH):
                 golden = golden_item_ids[:, i]
 
                 # action_choose_time_start = time.time()
-                budgets, item_action_dists, selected_item_ids, reward = actor.choose_action(cur_item_ids=inputs,
+                budgets, item_action_dists, selected_item_ids, reward, selected_block_ids = actor.choose_action(cur_item_ids=inputs,
                                                                                             golden_item_ids=golden,
                                                                                             user_ids=uids)
 

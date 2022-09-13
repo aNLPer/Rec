@@ -192,15 +192,17 @@ def item_split(items_price, step):
         splited_item.append([items_price[i] for i in ids])
     return splited_item
 
-def data_split(data, train_rate=0.5):
+def data_split(data):
     train_data = {}
     valid_data = {}
+    test_data = {}
     for key, value in data.items():
-        if len(value)*train_rate < 2 or len(value)*(1-train_rate) < 2:
+        if len(value) < 5:
             pass
-        train_data[key] = value[:int(len(value)*train_rate)]
-        valid_data[key] = value[int(len(value)*train_rate):]
-    return train_data, valid_data
+        train_data[key] = value[:-3]
+        valid_data[key] = value[-3:-1]
+        test_data[key] = value[-2:]
+    return train_data, valid_data, test_data
 
 # 选择 action 计算对应的概率
 def action_select(state, action_num, policys):
@@ -299,6 +301,8 @@ def pad_and_cut(data, length):
     new_data = np.array(data.tolist())
     return new_data
 
+def mrr():
+    pass
 
 if __name__=="__main__":
     a = [(-1, float("inf"))]*10
