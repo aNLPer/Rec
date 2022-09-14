@@ -315,7 +315,7 @@ def mrr(goden, selected_block_ids, block_size, selected_item_dist, TOPN=10):
     for i in range(indices.shape[0]):
         if goden[i] != 1024 and goden[i] in indices[i].tolist()[:TOPN]:
             mrr += 1. / (1 + indices[i].tolist()[:TOPN].index(goden[i]))
-    return mrr
+    return mrr/len(goden)
 
 def hr(goden, selected_block_ids, block_size, selected_item_dist, TOPN=10):
     # 处理goden不在selected_block的情况
