@@ -313,7 +313,7 @@ def mrr(goden, selected_block_ids, block_size, selected_item_dist, TOPN=10):
     # indices = indices.squeeze(0)
 
     for i in range(indices.shape[0]):
-        if goden[i] != 1024:
+        if goden[i] != 1024 and goden[i] in indices[i].tolist()[:TOPN]:
             mrr += 1. / (1 + indices[i].tolist()[:TOPN].index(goden[i]))
     return mrr
 
@@ -333,7 +333,7 @@ def hr(goden, selected_block_ids, block_size, selected_item_dist, TOPN=10):
             score += 1
     return score/len(goden)
 
-def map(goden, selected_block_ids, block_size, selected_item_dist, TOPN=10):
+def Metrics_map(goden, selected_block_ids, block_size, selected_item_dist, TOPN=10):
     # 处理goden不在selected_block的情况
     for i in range(len(goden)):
         if int(goden[i] / block_size) != selected_block_ids[i]:
@@ -354,11 +354,32 @@ def map(goden, selected_block_ids, block_size, selected_item_dist, TOPN=10):
         aps.append(ap)
     return sum(aps)/len(aps)
 
+def ndcg(goden, selected_block_ids, block_size, selected_item_dist, TOPN=10):
+    # 处理goden不在selected_block的情况
+    for i in range(len(goden)):
+        if int(goden[i] / block_size) != selected_block_ids[i]:
+            goden[i] = 1024
+        else:
+            goden[i] = goden[i] % block_size
 
+    _, indices = torch.sort(selected_item_dist, descending=True)
+    # indices = indices.squeeze(0)
 
-def ndcg():
-    pass
+    #dcg
+    dcgs = []
+    for i in range(len(goden)):
+        d = 0.
+        for j in range(TOPN):
+            if goden[i] == indices[i].tolist()[j]:
+                d = 1.0/math.log(j+1,2)
+        dcgs.append(d)
+    idcgs = []
+    for i in range(len(goden)):
+        d = 1.0/math.log(1+1, 2)
+        idcgs.append(d)
+    ndcg = sum(np.array(dcgs)/np.array(idcgs))/len(goden)
 
+    return ndcg
 
 if __name__=="__main__":
     a = [(-1, float("inf"))]*10

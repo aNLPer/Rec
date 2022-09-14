@@ -13,7 +13,7 @@ import torch.nn.functional as F
 import torch.utils.data
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
 from torch.distributions import Categorical
-from AC4Rec.utils_multiUser import DataPre, Voc, data_split, BlockPolicy, ItemPolicy, BudgetNet, item_split, action_select, action_distribution, data_loader, pad_and_cut, BudgetPolicy, category_sampling, mrr, hr
+from AC4Rec.utils_multiUser import DataPre, Voc, data_split, BlockPolicy, ItemPolicy, BudgetNet, item_split, action_select, action_distribution, data_loader, pad_and_cut, BudgetPolicy, category_sampling, mrr, hr, Metrics_map, ndcg
 from sklearn.metrics._ranking import label_ranking_average_precision_score
 
 
@@ -271,9 +271,6 @@ for epoch in range(EPOCH):
             budgets, item_action_dists, selected_item_ids, reward, selected_block_ids = actor.choose_action(cur_item_ids=inputs,
                                                                              golden_item_ids=golden,
                                                                              user_ids=uids)
-            mrr = mrr(golden, selected_block_ids, BLOCK_SIZE, item_action_dists)
-            hr = hr(golden, selected_block_ids, BLOCK_SIZE, item_action_dists, TOPN)
-            # print(f"action_choose_time{time.time()-action_choose_time_start}\n")
 
             with torch.no_grad():
                 next_budgets = actor.budget_net(selected_item_ids, uids)
@@ -311,10 +308,12 @@ for epoch in range(EPOCH):
                                                                                             golden_item_ids=golden,
                                                                                             user_ids=uids)
                 # 评价指标
-                mrr = mrr(golden, selected_block_ids, BLOCK_SIZE, item_action_dists)
-                hr = hr(golden, selected_block_ids, BLOCK_SIZE, item_action_dists, TOPN)
+                mrr_v = mrr(golden, selected_block_ids, BLOCK_SIZE, item_action_dists, TOPN)
+                hr_v = hr(golden, selected_block_ids, BLOCK_SIZE, item_action_dists, TOPN)
+                map_v = Metrics_map(golden, selected_block_ids, BLOCK_SIZE, item_action_dists, TOPN)
+                ndcg_v = ndcg(golden, selected_block_ids, BLOCK_SIZE, item_action_dists, TOPN)
 
                 total_reward += reward
-    print(f"epoch: {epoch}  total-reward: {round(total_reward, 2)}  mrr: {round(mrr, 2)}  hr: {round(hr, 2)}  map"
-          f"time: {round((time.time() - epoch_time) / 60, 2) }min\n")
+    print(f"epoch: {epoch}  total-reward: {round(total_reward, 2)}  mrr:{round(mrr_v, 2)}  hr:{round(hr_v, 2)}  map:{round(map_v, 2)}  ndcg:{round(ndcg_v, 2)}"
+          f"  time: {round((time.time() - epoch_time) / 60, 2) }min\n")
 
