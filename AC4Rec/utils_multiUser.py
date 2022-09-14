@@ -301,8 +301,64 @@ def pad_and_cut(data, length):
     new_data = np.array(data.tolist())
     return new_data
 
-def mrr():
+def mrr(goden, selected_block_ids, block_size, selected_item_dist, TOPN=10):
+    # 处理goden不在selected_block的情况
+    for i in range(len(goden)):
+        if int(goden[i]/block_size) != selected_block_ids[i]:
+            goden[i] = 1024
+        else:
+            goden[i] = goden[i] % block_size
+    mrr = 0.
+    _, indices = torch.sort(selected_item_dist, descending=True)
+    # indices = indices.squeeze(0)
+
+    for i in range(indices.shape[0]):
+        if goden[i] != 1024:
+            mrr += 1. / (1 + indices[i].tolist()[:TOPN].index(goden[i]))
+    return mrr
+
+def hr(goden, selected_block_ids, block_size, selected_item_dist, TOPN=10):
+    # 处理goden不在selected_block的情况
+    for i in range(len(goden)):
+        if int(goden[i] / block_size) != selected_block_ids[i]:
+            goden[i] = 1024
+        else:
+            goden[i] = goden[i] % block_size
+    score = 0.
+    _, indices = torch.sort(selected_item_dist, descending=True)
+    # indices = indices.squeeze(0)
+
+    for i in range(indices.shape[0]):
+        if goden[i] in indices[i].tolist()[:TOPN]:
+            score += 1
+    return score/len(goden)
+
+def map(goden, selected_block_ids, block_size, selected_item_dist, TOPN=10):
+    # 处理goden不在selected_block的情况
+    for i in range(len(goden)):
+        if int(goden[i] / block_size) != selected_block_ids[i]:
+            goden[i] = 1024
+        else:
+            goden[i] = goden[i] % block_size
+
+    _, indices = torch.sort(selected_item_dist, descending=True)
+    # indices = indices.squeeze(0)
+
+    aps = []
+    for i in range(indices.shape[0]):
+        # 计算每个用户ap之和(存在一个问题，测试集中用户只有一个item)
+        ap = 0.
+        for j in range(TOPN):
+            if goden[i] == indices[i].tolist()[j]:
+                ap += (1.0/(i+1))/TOPN
+        aps.append(ap)
+    return sum(aps)/len(aps)
+
+
+
+def ndcg():
     pass
+
 
 if __name__=="__main__":
     a = [(-1, float("inf"))]*10
