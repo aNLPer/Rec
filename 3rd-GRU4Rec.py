@@ -32,7 +32,8 @@ import torch.utils.data as data
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 dtype = torch.float
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cpu")
 
 class Voc:
     def __init__(self, sentence=False):
