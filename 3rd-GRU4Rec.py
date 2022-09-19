@@ -195,24 +195,6 @@ val_x, val_y, val_seq_len = iter(val_data).next()
 test_data = DataLoader(test, batch_size=len(test), shuffle=False, collate_fn=collate_fn)
 test_x, test_y, test_seq_len = iter(test_data).next()
 
-for step in range(epoch_num):
-    data_loader = DataLoader(train, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
-    for i, min_batch in enumerate(data_loader):
-        model.train()
-
-        batch_x, batch_y, batch_x_len = min_batch
-        out, h = model(batch_x, batch_x_len)
-
-        loss = model.ce(out, pack_padded_sequence(torch.tensor(batch_y), batch_x_len, batch_first=True).data)
-
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-        print(loss.item(), i, step)
-        if (i + 1) % 10 == 0:
-            model.eval()
-            print(evaluation(model, val_x, val_y, val_seq_len, 5))
 model.eval()
 print(evaluation(model, test_x, test_y, test_seq_len, 10))
 

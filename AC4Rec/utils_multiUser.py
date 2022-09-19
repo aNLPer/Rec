@@ -373,6 +373,7 @@ def ndcg(goden, selected_block_ids, block_size, selected_item_dist, TOPN=10):
             if goden[i] == indices[i].tolist()[j]:
                 d = 1.0/math.log(j+1,2)
         dcgs.append(d)
+
     idcgs = []
     for i in range(len(goden)):
         d = 1.0/math.log(1+1, 2)

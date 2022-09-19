@@ -247,12 +247,21 @@ critic = Critic(input_dim=BUDGET_DIM)
 train_data, valid_data, test_data = data_split(dp.seq)
 
 for epoch in range(EPOCH):
+    print(f"epoch {epoch} :")
     epoch_time = time.time()
     # 设置模型为训练状态
     actor.budget_net.train()
     actor.blockPolicy.train()
     actor.itemPolicy.train()
     critic.network.train()
+    # 评价指标
+    train_block_acc = 0.0
+    train_ndcg_v = 0.0
+    train_mrr_v = 0.0
+    train_map_v = 0.0
+    train_hr_v = 0.0
+    train_block_acc = 0.0
+    rec_count = 0
     for uids, seqs in data_loader(train_data, BATCH_SIZE):
 
         # BATCH_SIZE_ = len(uids)
@@ -260,9 +269,11 @@ for epoch in range(EPOCH):
         actor.item_action_memory = []
         # 裁剪seq
         min_length = min([len(s) for s in seqs])
+        rec_count+=min_length
         seqs = pad_and_cut(np.array(seqs), min_length)
         input_item_ids = seqs[:, :-1]
         golden_item_ids = seqs[:, 1:]
+
         for i in range(min_length-1):
             inputs = input_item_ids[:, i]
             golden = golden_item_ids[:, i]
@@ -271,6 +282,15 @@ for epoch in range(EPOCH):
             budgets, item_action_dists, selected_item_ids, reward, selected_block_ids = actor.choose_action(cur_item_ids=inputs,
                                                                              golden_item_ids=golden,
                                                                              user_ids=uids)
+            for i in range(len(golden)):
+                if int(golden[i] / BLOCK_SIZE) == selected_block_ids[i]:
+                    train_block_acc += 1
+
+            # 评价指标
+            train_mrr_v += mrr(golden, selected_block_ids, BLOCK_SIZE, item_action_dists, TOPN)
+            train_hr_v += hr(golden, selected_block_ids, BLOCK_SIZE, item_action_dists, TOPN)
+            train_map_v += Metrics_map(golden, selected_block_ids, BLOCK_SIZE, item_action_dists, TOPN)
+            train_ndcg_v += ndcg(golden, selected_block_ids, BLOCK_SIZE, item_action_dists, TOPN)
 
             with torch.no_grad():
                 next_budgets = actor.budget_net(selected_item_ids, uids)
@@ -285,35 +305,41 @@ for epoch in range(EPOCH):
             # print(f"network_update_time: {time.time()-network_update_time}\n")
             # true_gradient = grad[logPi(a|s) * td_error]
             # 然后根据前面学到的V（s）值，训练actor，以更好地采样动作
-    total_reward = 0
-    # 设置模型为训练状态
-    actor.budget_net.eval()
-    actor.blockPolicy.eval()
-    actor.itemPolicy.eval()
-    critic.network.eval()
-    # 取消梯度跟踪
-    with torch.no_grad():
-        for uids, seqs in data_loader(valid_data, 8444):
-            # 裁剪seq
-            min_length = min([len(s) for s in seqs])
-            seqs = pad_and_cut(np.array(seqs), min_length)
-            input_item_ids = seqs[:, :-1]
-            golden_item_ids = seqs[:, 1:]
-            for i in range(min_length - 1):
-                inputs = input_item_ids[:, i]
-                golden = golden_item_ids[:, i]
 
-                # action_choose_time_start = time.time()
-                budgets, item_action_dists, selected_item_ids, reward, selected_block_ids = actor.choose_action(cur_item_ids=inputs,
-                                                                                            golden_item_ids=golden,
-                                                                                            user_ids=uids)
-                # 评价指标
-                mrr_v = mrr(golden, selected_block_ids, BLOCK_SIZE, item_action_dists, TOPN)
-                hr_v = hr(golden, selected_block_ids, BLOCK_SIZE, item_action_dists, TOPN)
-                map_v = Metrics_map(golden, selected_block_ids, BLOCK_SIZE, item_action_dists, TOPN)
-                ndcg_v = ndcg(golden, selected_block_ids, BLOCK_SIZE, item_action_dists, TOPN)
+    print(f"train_mrr:{round(train_mrr_v/rec_count, 2)}  train_hr:{round(train_hr_v/rec_count, 2)}  train_map:{round(train_map_v/rec_count, 2)}  train_ndcg:{round(train_ndcg_v/rec_count, 2)}"
+        f"train_block_acc: {train_block_acc/rec_count} time: {round((time.time() - epoch_time) / 60, 2)}min\n")
 
-                total_reward += reward
-    print(f"epoch: {epoch}  total-reward: {round(total_reward, 2)}  mrr:{round(mrr_v, 2)}  hr:{round(hr_v, 2)}  map:{round(map_v, 2)}  ndcg:{round(ndcg_v, 2)}"
-          f"  time: {round((time.time() - epoch_time) / 60, 2) }min\n")
+    # total_reward = 0
+    # # 设置模型为训练状态
+    # actor.budget_net.eval()
+    # actor.blockPolicy.eval()
+    # actor.itemPolicy.eval()
+    # critic.network.eval()
+    # # 取消梯度跟踪
+    # with torch.no_grad():
+    #     for uids, seqs in data_loader(valid_data, 8444):
+    #         # 裁剪seq
+    #         min_length = min([len(s) for s in seqs])
+    #         seqs = pad_and_cut(np.array(seqs), min_length)
+    #         input_item_ids = seqs[:, :-1]
+    #         golden_item_ids = seqs[:, 1:]
+    #         for i in range(min_length - 1):
+    #             inputs = input_item_ids[:, i]
+    #             golden = golden_item_ids[:, i]
+    #
+    #             # action_choose_time_start = time.time()
+    #             budgets, item_action_dists, selected_item_ids, reward, selected_block_ids = actor.choose_action(cur_item_ids=inputs,
+    #                                                                                         golden_item_ids=golden,
+    #                                                                                         user_ids=uids)
+    #
+    #
+    #             # 评价指标
+    #             mrr_v = mrr(golden, selected_block_ids, BLOCK_SIZE, item_action_dists, TOPN)
+    #             hr_v = hr(golden, selected_block_ids, BLOCK_SIZE, item_action_dists, TOPN)
+    #             map_v = Metrics_map(golden, selected_block_ids, BLOCK_SIZE, item_action_dists, TOPN)
+    #             ndcg_v = ndcg(golden, selected_block_ids, BLOCK_SIZE, item_action_dists, TOPN)
+    #
+    #             total_reward += reward
+    # print(f"epoch: {epoch}  total-reward: {round(total_reward, 2)}  mrr:{round(mrr_v, 2)}  hr:{round(hr_v, 2)}  map:{round(map_v, 2)}  ndcg:{round(ndcg_v, 2)}"
+    #       f"  time: {round((time.time() - epoch_time) / 60, 2) }min\n")
 
