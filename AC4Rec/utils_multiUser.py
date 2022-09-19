@@ -192,16 +192,38 @@ def item_split(items_price, step):
         splited_item.append([items_price[i] for i in ids])
     return splited_item
 
-def data_split(data):
-    train_data = {}
-    valid_data = {}
-    test_data = {}
-    for key, value in data.items():
-        if len(value) < 5:
-            pass
-        train_data[key] = value[:-3]
-        valid_data[key] = value[-3:-1]
-        test_data[key] = value[-2:]
+def data_split(data, shuffe=False):
+    train_data = []
+    valid_data = []
+    test_data = []
+    data = list(data.items())
+    data.sort(key=lambda x:len(x[1]), reverse=False)
+    indices = list(range(len(data)))
+    if shuffe:# 打乱数据
+        np.random.shuffle(indices)
+    # 划分数据
+    train_indices = indices[:int(len(data)*0.6)]
+    valid_indices = indices[int(len(data)*0.6):int(len(data)*0.8)]
+    test_indices = indices[int(len(data) * 0.8):]
+    train_data_ = [data[i] for i in train_indices]
+    valid_data_ = [data[i] for i in valid_indices]
+    test_data_ = [data[i] for i in test_indices]
+
+    for sample in train_data_:
+        item = [sample[0]]
+        item.append([item[0] for item in sample[1]])
+        train_data.append(item)
+
+    for sample in valid_data_:
+        item = [sample[0]]
+        item.append([item[0] for item in sample[1]])
+        valid_data.append(item)
+
+    for sample in test_data_:
+        item = [sample[0]]
+        item.append([item[0] for item in sample[1]])
+        test_data.append(item)
+
     return train_data, valid_data, test_data
 
 # 选择 action 计算对应的概率
@@ -268,19 +290,19 @@ def data_loader(data, batch_size):
     :param batch_size: batch_size
     :return:
     """
-    # tuple:[8444]
-    sorted_data = sorted(data.items(), key=lambda x: len(x[1]))
-    uids = []
-    seqs = []
-    for uid, s in sorted_data:
-        uids.append(uid)
-        seqs.append([item[0] for item in s])
-    num_examples = len(seqs)
+    # tuple:[8444,]
+    # sorted_data = sorted(data.items(), key=lambda x: len(x[1]))
+    # uids = []
+    # seqs = []
+    # for uid, s in sorted_data:
+    #     uids.append(uid)
+    #     seqs.append([item[0] for item in s])
+    num_examples = len(data)
     indices = list(range(num_examples))
     for i in range(0, num_examples, batch_size):
         ids = indices[i: min(i + batch_size, num_examples)]
         # 最后⼀次可能不⾜⼀个batch
-        yield [uids[j] for j in ids], [seqs[j] for j in ids]
+        yield [data[j][0] for j in ids], [data[j][1] for j in ids]
 
 def category_sampling(prob):
     m = Categorical(prob)

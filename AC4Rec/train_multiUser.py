@@ -49,7 +49,7 @@ USER_DIM = 512
 BUDGET_DIM = 512
 BLOCK_DIM = 512
 GRU_HIDDEN_SIZE = 512
-EPOCH = 400
+EPOCH = 100
 BLOCK_SIZE = 256
 BLOCK_NUM = math.ceil(dp.itemVoc.num_words/BLOCK_SIZE)
 TAIL_BLOCK_SIZE = dp.itemVoc.num_words % BLOCK_SIZE
@@ -262,7 +262,7 @@ for epoch in range(EPOCH):
     train_hr_v = 0.0
     train_block_acc = 0.0
     rec_count = 0
-    for uids, seqs in data_loader(train_data, BATCH_SIZE):
+    for uids, seqs, in data_loader(train_data, BATCH_SIZE):
 
         # BATCH_SIZE_ = len(uids)
         # 清空memory
