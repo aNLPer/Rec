@@ -1,2 +1,3 @@
-d = {1:"a", 2:"b"}
-print(list(d.items()))
+a = [1,2,3]
+a.extend([[1],[2]])
+print(a)

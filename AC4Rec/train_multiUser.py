@@ -13,7 +13,7 @@ import torch.nn.functional as F
 import torch.utils.data
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
 from torch.distributions import Categorical
-from AC4Rec.utils_multiUser import DataPre, Voc, data_split, BlockPolicy, ItemPolicy, BudgetNet, item_split, action_select, action_distribution, data_loader, pad_and_cut, BudgetPolicy, category_sampling, mrr, hr, Metrics_map, ndcg
+from AC4Rec.utils_multiUser import DataPre, Voc, data_split, BlockPolicy, ItemPolicy, BudgetNet, item_split, action_select, action_distribution, data_loader, pad_and_cut, BudgetPolicy, category_sampling, evaluate
 from sklearn.metrics._ranking import label_ranking_average_precision_score
 
 
@@ -249,19 +249,20 @@ train_data, valid_data, test_data = data_split(dp.seq)
 for epoch in range(EPOCH):
     print(f"epoch {epoch} :")
     epoch_time = time.time()
+
     # 设置模型为训练状态
     actor.budget_net.train()
     actor.blockPolicy.train()
     actor.itemPolicy.train()
     critic.network.train()
+
     # 评价指标
-    train_block_acc = 0.0
-    train_ndcg_v = 0.0
-    train_mrr_v = 0.0
-    train_map_v = 0.0
-    train_hr_v = 0.0
-    train_block_acc = 0.0
-    rec_count = 0
+    goldens = []
+    selected_blocks = []
+    item_dists = []
+    selected_block_num = 0.0
+    train_rec_count = 0
+    train_total_reword = 0.0
     for uids, seqs, in data_loader(train_data, BATCH_SIZE):
 
         # BATCH_SIZE_ = len(uids)
@@ -269,7 +270,7 @@ for epoch in range(EPOCH):
         actor.item_action_memory = []
         # 裁剪seq
         min_length = min([len(s) for s in seqs])
-        rec_count+=min_length
+        train_rec_count+=min_length
         seqs = pad_and_cut(np.array(seqs), min_length)
         input_item_ids = seqs[:, :-1]
         golden_item_ids = seqs[:, 1:]
@@ -282,15 +283,16 @@ for epoch in range(EPOCH):
             budgets, item_action_dists, selected_item_ids, reward, selected_block_ids = actor.choose_action(cur_item_ids=inputs,
                                                                              golden_item_ids=golden,
                                                                              user_ids=uids)
+
+            train_total_reword+=reward
+
             for i in range(len(golden)):
                 if int(golden[i] / BLOCK_SIZE) == selected_block_ids[i]:
-                    train_block_acc += 1
+                    selected_block_num += 1
 
-            # 评价指标
-            train_mrr_v += mrr(golden, selected_block_ids, BLOCK_SIZE, item_action_dists, TOPN)
-            train_hr_v += hr(golden, selected_block_ids, BLOCK_SIZE, item_action_dists, TOPN)
-            train_map_v += Metrics_map(golden, selected_block_ids, BLOCK_SIZE, item_action_dists, TOPN)
-            train_ndcg_v += ndcg(golden, selected_block_ids, BLOCK_SIZE, item_action_dists, TOPN)
+            goldens.extend(golden)
+            selected_blocks.extend(selected_block_ids)
+            item_dists.extend(item_action_dists.tolist())
 
             with torch.no_grad():
                 next_budgets = actor.budget_net(selected_item_ids, uids)
@@ -305,41 +307,50 @@ for epoch in range(EPOCH):
             # print(f"network_update_time: {time.time()-network_update_time}\n")
             # true_gradient = grad[logPi(a|s) * td_error]
             # 然后根据前面学到的V（s）值，训练actor，以更好地采样动作
+    # 评价模型
+    hr, map_, mrr, ndcg = evaluate(goldens, selected_blocks, BLOCK_SIZE, item_dists)
+    print(f"train_total-reward: {round(train_total_reword, 2)}  train_mrr:{round(mrr, 2)}  train_hr:{round(hr, 2)}  train_map:{round(map_, 2)}  train_ndcg:{round(ndcg, 2)}  train_block_acc: {selected_block_num/train_rec_count}")
 
-    print(f"train_mrr:{round(train_mrr_v/rec_count, 2)}  train_hr:{round(train_hr_v/rec_count, 2)}  train_map:{round(train_map_v/rec_count, 2)}  train_ndcg:{round(train_ndcg_v/rec_count, 2)}"
-        f"train_block_acc: {train_block_acc/rec_count} time: {round((time.time() - epoch_time) / 60, 2)}min\n")
+    goldens = []
+    selected_blocks = []
+    item_dists = []
+    selected_block_num = 0.0
+    valid_rec_count = 0
+    valid_total_reward = 0
+    # 设置模型为训练状态
+    actor.budget_net.eval()
+    actor.blockPolicy.eval()
+    actor.itemPolicy.eval()
+    critic.network.eval()
+    # 取消梯度跟踪
+    with torch.no_grad():
+        for uids, seqs in data_loader(valid_data, BATCH_SIZE):
+            # 裁剪seq
+            min_length = min([len(s) for s in seqs])
+            valid_rec_count += min_length
+            seqs = pad_and_cut(np.array(seqs), min_length)
+            input_item_ids = seqs[:, :-1]
+            golden_item_ids = seqs[:, 1:]
+            for i in range(min_length - 1):
+                inputs = input_item_ids[:, i]
+                golden = golden_item_ids[:, i]
 
-    # total_reward = 0
-    # # 设置模型为训练状态
-    # actor.budget_net.eval()
-    # actor.blockPolicy.eval()
-    # actor.itemPolicy.eval()
-    # critic.network.eval()
-    # # 取消梯度跟踪
-    # with torch.no_grad():
-    #     for uids, seqs in data_loader(valid_data, 8444):
-    #         # 裁剪seq
-    #         min_length = min([len(s) for s in seqs])
-    #         seqs = pad_and_cut(np.array(seqs), min_length)
-    #         input_item_ids = seqs[:, :-1]
-    #         golden_item_ids = seqs[:, 1:]
-    #         for i in range(min_length - 1):
-    #             inputs = input_item_ids[:, i]
-    #             golden = golden_item_ids[:, i]
-    #
-    #             # action_choose_time_start = time.time()
-    #             budgets, item_action_dists, selected_item_ids, reward, selected_block_ids = actor.choose_action(cur_item_ids=inputs,
-    #                                                                                         golden_item_ids=golden,
-    #                                                                                         user_ids=uids)
-    #
-    #
-    #             # 评价指标
-    #             mrr_v = mrr(golden, selected_block_ids, BLOCK_SIZE, item_action_dists, TOPN)
-    #             hr_v = hr(golden, selected_block_ids, BLOCK_SIZE, item_action_dists, TOPN)
-    #             map_v = Metrics_map(golden, selected_block_ids, BLOCK_SIZE, item_action_dists, TOPN)
-    #             ndcg_v = ndcg(golden, selected_block_ids, BLOCK_SIZE, item_action_dists, TOPN)
-    #
-    #             total_reward += reward
-    # print(f"epoch: {epoch}  total-reward: {round(total_reward, 2)}  mrr:{round(mrr_v, 2)}  hr:{round(hr_v, 2)}  map:{round(map_v, 2)}  ndcg:{round(ndcg_v, 2)}"
-    #       f"  time: {round((time.time() - epoch_time) / 60, 2) }min\n")
+                # action_choose_time_start = time.time()
+                budgets, item_action_dists, selected_item_ids, reward, selected_block_ids = actor.choose_action(cur_item_ids=inputs,
+                                                                                            golden_item_ids=golden,
+                                                                                            user_ids=uids)
+
+                valid_total_reward += reward
+                # 评价指标
+                for i in range(len(golden)):
+                    if int(golden[i] / BLOCK_SIZE) == selected_block_ids[i]:
+                        selected_block_num += 1
+
+                goldens.extend(golden)
+                selected_blocks.extend(selected_block_ids)
+                item_dists.extend(item_action_dists.tolist())
+    # 评价模型
+    hr, map_, mrr, ndcg = evaluate(goldens, selected_blocks, BLOCK_SIZE, item_dists)
+    print(f"valid_total-reward: {round(valid_total_reward, 2)} valid_mrr:{round(mrr, 2)}  valid_hr:{round(hr, 2)}  valid_map:{round(map_, 2)}  valid_ndcg:{round(ndcg, 2)}  "
+          f"valid_block_acc: {round(selected_block_num/valid_rec_count, 2)} \ntime: {round((time.time() - epoch_time) / 60, 2) }min\n")
 
