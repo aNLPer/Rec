@@ -38,7 +38,7 @@ with open("./dp.pkl", "rb") as f:
 # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 device = torch.device("cpu")
 
-TOPN = 10
+TOPN = 200
 DATA_PATH = '../dataset/filtered_data.csv'
 BATCH_SIZE = 128
 GAMMA = 0.9
@@ -115,7 +115,7 @@ class Actor(object):
         """
         # 估计用户的预算  [budget_dim]
         #[batch_size, budget_dim]
-        budgets = self.budget_net(cur_item_ids, user_ids)
+        budgets = self.budget_net(cur_item_ids)
 
         # 根据budget选择budget_block
         # [batch_size, block_num]
@@ -141,8 +141,7 @@ class Actor(object):
                 reward += 0.1
             elif selected_item_prices[i] < user_budgets[i][1] and selected_item_prices[i]>user_budgets[i][0]:
                 reward += 0.05
-            else:
-                reward -= 0.05
+
         return budgets, item_dists, selected_item_ids, reward, selected_block_ids
 
     def learn(self,item_id, item_dist, td_error):
@@ -287,7 +286,8 @@ for epoch in range(EPOCH):
             train_total_reword+=reward
 
             for i in range(len(golden)):
-                if int(golden[i] / BLOCK_SIZE) == selected_block_ids[i]:
+                b = [item[0] for item in budget_blocks[selected_block_ids[i]]]
+                if golden[i] in b:
                     selected_block_num += 1
 
             goldens.extend(golden)
@@ -295,7 +295,7 @@ for epoch in range(EPOCH):
             item_dists.extend(item_action_dists.tolist())
 
             with torch.no_grad():
-                next_budgets = actor.budget_net(selected_item_ids, uids)
+                next_budgets = actor.budget_net(selected_item_ids)
 
             # network_update_time = time.time()
             td_error = critic.train_Q_network(
@@ -308,13 +308,13 @@ for epoch in range(EPOCH):
             # true_gradient = grad[logPi(a|s) * td_error]
             # 然后根据前面学到的V（s）值，训练actor，以更好地采样动作
     # 评价模型
-    hr, map_, mrr, ndcg = evaluate(goldens, selected_blocks, BLOCK_SIZE, item_dists)
-    print(f"train_total-reward: {round(train_total_reword, 2)}  train_mrr:{round(mrr, 2)}  train_hr:{round(hr, 2)}  train_map:{round(map_, 2)}  train_ndcg:{round(ndcg, 2)}  train_block_acc: {selected_block_num/train_rec_count}")
+    hr, map_, mrr = evaluate(goldens, selected_blocks, item_dists, budget_blocks, TOPN=TOPN)
+    print(f"train_total-reward: {round(train_total_reword, 2)}  train_mrr:{round(mrr, 2)}  train_hr:{round(hr, 2)}  train_map:{round(map_, 2)}  train_block_acc: {selected_block_num/train_rec_count}")
 
     goldens = []
     selected_blocks = []
     item_dists = []
-    selected_block_num = 0.0
+    selected_block_num = 0
     valid_rec_count = 0
     valid_total_reward = 0
     # 设置模型为训练状态
@@ -350,7 +350,7 @@ for epoch in range(EPOCH):
                 selected_blocks.extend(selected_block_ids)
                 item_dists.extend(item_action_dists.tolist())
     # 评价模型
-    hr, map_, mrr, ndcg = evaluate(goldens, selected_blocks, BLOCK_SIZE, item_dists)
-    print(f"valid_total-reward: {round(valid_total_reward, 2)} valid_mrr:{round(mrr, 2)}  valid_hr:{round(hr, 2)}  valid_map:{round(map_, 2)}  valid_ndcg:{round(ndcg, 2)}  "
+    hr, map_, mrr = evaluate(goldens, selected_blocks, item_dists, budget_blocks, TOPN=TOPN)
+    print(f"valid_total-reward: {round(valid_total_reward, 2)} valid_mrr:{round(mrr, 2)}  valid_hr:{round(hr, 2)}  valid_map:{round(map_, 2)} "
           f"valid_block_acc: {round(selected_block_num/valid_rec_count, 2)} \ntime: {round((time.time() - epoch_time) / 60, 2) }min\n")
 

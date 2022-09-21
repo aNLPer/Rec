@@ -167,11 +167,11 @@ class BudgetNet(nn.Module):
             nn.Linear(int(0.5*gru_hidden_size), budget_dim)
         )
 
-    def forward(self, cur_item_id, user_id):
+    def forward(self, cur_item_id):
         """
         """
         # [batch_size, user_dim]
-        user_em = self.user_em(torch.LongTensor(user_id).to(device))
+        # user_em = self.user_em(torch.LongTensor(user_id).to(device))
         # [batch_size, item_dim]
         cur_item_em = self.item_em(torch.LongTensor(cur_item_id).to(device))
 
@@ -181,7 +181,7 @@ class BudgetNet(nn.Module):
         # [batch_size, budget_dim]
         budget_pred = self.fc(out)
         # [batch_size, budget_dim]
-        return budget_pred+user_em
+        return budget_pred
 
 def item_split(items_price, step):
     num_items = len(items_price)
@@ -323,123 +323,48 @@ def pad_and_cut(data, length):
     new_data = np.array(data.tolist())
     return new_data
 
-def mrr(goden, selected_block_ids, block_size, selected_item_dist, TOPN=10):
-    # 处理goden不在selected_block的情况
-    for i in range(len(goden)):
-        if int(goden[i]/block_size) != selected_block_ids[i]:
-            goden[i] = 1024
-        else:
-            goden[i] = goden[i] % block_size
-    mrr = 0.
-    _, indices = torch.sort(selected_item_dist, descending=True)
-    # indices = indices.squeeze(0)
-
-    for i in range(indices.shape[0]):
-        if goden[i] != 1024 and goden[i] in indices[i].tolist()[:TOPN]:
-            mrr += 1. / (1 + indices[i].tolist()[:TOPN].index(goden[i]))
-    return mrr/len(goden)
-
-def hr(goden, selected_block_ids, block_size, selected_item_dist, TOPN=10):
-    # 处理goden不在selected_block的情况
-    for i in range(len(goden)):
-        if int(goden[i] / block_size) != selected_block_ids[i]:
-            goden[i] = 1024
-        else:
-            goden[i] = goden[i] % block_size
-    score = 0.
-    _, indices = torch.sort(selected_item_dist, descending=True)
-    # indices = indices.squeeze(0)
-
-    for i in range(indices.shape[0]):
-        if goden[i] in indices[i].tolist()[:TOPN]:
-            score += 1
-    return score/len(goden)
-
-def Metrics_map(goden, selected_block_ids, block_size, selected_item_dist, TOPN=10):
-    # 处理goden不在selected_block的情况
-    for i in range(len(goden)):
-        if int(goden[i] / block_size) != selected_block_ids[i]:
-            goden[i] = 1024
-        else:
-            goden[i] = goden[i] % block_size
-
-    _, indices = torch.sort(selected_item_dist, descending=True)
-    # indices = indices.squeeze(0)
-
-    aps = []
-    for i in range(indices.shape[0]):
-        # 计算每个用户ap之和(存在一个问题，测试集中用户只有一个item)
-        ap = 0.
-        for j in range(TOPN):
-            if goden[i] == indices[i].tolist()[j]:
-                ap += (1.0/(i+1))/TOPN
-        aps.append(ap)
-    return sum(aps)/len(aps)
-
-def ndcg(goden, selected_block_ids, block_size, selected_item_dist, TOPN=10):
-    # 处理goden不在selected_block的情况
-    for i in range(len(goden)):
-        if int(goden[i] / block_size) != selected_block_ids[i]:
-            goden[i] = 1024
-        else:
-            goden[i] = goden[i] % block_size
-
-    _, indices = torch.sort(selected_item_dist, descending=True)
-    # indices = indices.squeeze(0)
-
-    #dcg
-    dcgs = []
-    for i in range(len(goden)):
-        d = 0.
-        for j in range(TOPN):
-            if goden[i] == indices[i].tolist()[j]:
-                d = 1.0/math.log(j+1,2)
-        dcgs.append(d)
-
-    idcgs = []
-    for i in range(len(goden)):
-        d = 1.0/math.log(1+1, 2)
-        idcgs.append(d)
-    ndcg = sum(np.array(dcgs)/np.array(idcgs))/len(goden)
-
-    return ndcg
-
-def evaluate(goldens, selected_block_ids, block_size, selected_item_dist, TOPN=10):
+def evaluate(goldens, selected_block_ids, selected_item_dist, budget_blocks, TOPN=200):
     """
     golden:[rec_count]
     selected_block_ids:[rec_count]
     selected_item_dist:[rec_count, block_size]
     """
-    # 处理goden不在selected_block的情况
-    for i in range(len(goldens)):
-        if int(goldens[i] / block_size) != selected_block_ids[i]:
-            goldens[i] = 1024 # 设置一个大与block_size=256的值
-        else:
-            goldens[i] = goldens[i] % block_size
-
+    # 处理golden不在selected_block的情况
+    # for i in range(len(goldens)):
+    #     if goldens[i] in [item[0] for item in budget_blocks[selected_block_ids[i]]]:
+    #         goldens[i] = 1024 # 设置一个大与block_size=256的值
+    #     else:
+    #         goldens[i] = goldens[i] % block_size
     # 计算 hit ratio
     h_count = 0
     for i in range(len(goldens)):
+        selected_block = [item[0] for item in budget_blocks[selected_block_ids[i]]]
+        if goldens[i] not in selected_block:
+            continue
         # 推荐排序
         dist = list(enumerate(selected_item_dist[i]))
         dist.sort(key=lambda x: x[1], reverse=True)
 
         for j in range(TOPN):
-            if goldens[i] == dist[j][0]:
+            if goldens[i] == selected_block[dist[j][0]]:
                 h_count += 1
+    print(h_count)
     hr = h_count/len(goldens)
 
     # 计算 map
     map_= 0.0
     aps = []
     for i in range(len(goldens)):
+        selected_block = [item[0] for item in budget_blocks[selected_block_ids[i]]]
+        if goldens[i] not in selected_block:
+            continue
         # 排序
         dist = list(enumerate(selected_item_dist[i]))
         dist.sort(key=lambda x: x[1], reverse=True)
         # 计算每个用户ap之和(存在一个问题，测试集中用户只有一个item)
         ap = 0.
         for j in range(TOPN):
-            if goldens[i] == dist[j][0]:
+            if goldens[i] == selected_block[dist[j][0]]:
                 ap += (1.0 / (j + 1)) / TOPN
         aps.append(ap)
     map_ = sum(aps) / len(aps)
@@ -447,28 +372,34 @@ def evaluate(goldens, selected_block_ids, block_size, selected_item_dist, TOPN=1
     # 计算 mrr
     mrr = 0.0
     for i in range(len(goldens)):
+        selected_block = [item[0] for item in budget_blocks[selected_block_ids[i]]]
+        if goldens[i] not in selected_block:
+            continue
         # 排序
         dist = list(enumerate(selected_item_dist[i]))
         dist.sort(key=lambda x: x[1], reverse=True)
         sorted_indices = [item[0] for item in dist]
-        if goldens[i] != 1024 and goldens[i] in sorted_indices[:TOPN]:
-            mrr += 1. / (1 + sorted_indices[:TOPN].index(goldens[i]))
+
+        for j in range(TOPN):
+            if goldens[i] == selected_block[dist[j][0]]:
+                mrr += 1. / (1 + j)
     mrr = mrr/len(goldens)
 
     # 计算ndcg
     # dcg
-    dcgs = []
-    for i in range(len(goldens)):
-        dist = list(enumerate(selected_item_dist[i]))
-        dist.sort(key=lambda x: x[1], reverse=True)
-        sorted_indices = [item[0] for item in dist]
-        d = 0.0
-        for j in range(TOPN):
-            if goldens[i] == sorted_indices[j]:
-                d += 1.0/(math.log(j+1,2)+0.0001)
-        dcgs.append(d)
-
-    idcgs = [1.0] * len(goldens)
+    # dcgs = []
+    # for i in range(len(goldens)):
+    #
+    #     dist = list(enumerate(selected_item_dist[i]))
+    #     dist.sort(key=lambda x: x[1], reverse=True)
+    #     sorted_indices = [item[0] for item in dist]
+    #     d = 0.0
+    #     for j in range(TOPN):
+    #         if goldens[i] == sorted_indices[j]:
+    #             d += 1.0/(math.log(j+1,2)+0.0001)
+    #     dcgs.append(d)
+    #
+    # idcgs = [1.0] * len(goldens)
     # for i in range(len(goldens)):
     #     dist = list(enumerate(selected_item_dist[i]))
     #     dist.sort(key=lambda x: x[1], reverse=True)
@@ -479,10 +410,10 @@ def evaluate(goldens, selected_block_ids, block_size, selected_item_dist, TOPN=1
     #             d += 1.0 / math.log(1 + 1, 2)
     #     dcgs.append(d)
 
-    ndcg = sum(np.array(dcgs)/np.array(idcgs))/len(goldens)
+    # ndcg = sum(np.array(dcgs)/np.array(idcgs))/len(goldens)
 
 
-    return hr, map_, mrr, ndcg
+    return hr, map_, mrr
 
 if __name__=="__main__":
     a = [(-1, float("inf"))]*10
