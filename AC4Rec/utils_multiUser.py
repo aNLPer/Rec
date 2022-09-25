@@ -40,11 +40,15 @@ class DataPre:
         self.actionVoc = Voc(data['是否中标'])
         self.item_freq = {} # {item_id: frequence}
         self.seq = {}  # item_seq {uid: {[iid, action, value],[...]}}
+        self.userPreference = {} # {uid:[itemid]}
+
         self._toSeq()
         self._getItemPrice()
         self._getUserBudgets()
+        self._getUserPreference()
 
     def _toSeq(self):
+        # making user interaction order
         for index, row in self.data.iterrows():
             uid = self.userVoc.word2index[int(row['商户ID'])]
             iid = self.itemVoc.word2index[int(row['车ID'])]
@@ -59,6 +63,7 @@ class DataPre:
             self.seq[uid] = sorted(items, key=lambda x: x[-1])
 
     def _getItemPrice(self):
+        # making item2price
         itemPrice = [0]*self.itemVoc.num_words
         for word in self.itemVoc.word2index.keys():
             temp = self.data[self.data["车ID"] == word]
@@ -71,8 +76,10 @@ class DataPre:
         self.itemPrice = itemPrice
 
     def _getUserBudgets(self):
+        # making user2budget
         userBudgets = [0] * self.userVoc.num_words
         for key, values in self.seq.items():
+            # key：uid
             provide_prices = [p[2] for p in values]
             provide_prices.remove(max(provide_prices))
             provide_prices.remove(min(provide_prices))
@@ -82,6 +89,13 @@ class DataPre:
             # else:
             #     userBudgets[key] = int(sum(provide_prices)/len(provide_prices))
         self.userBudgets = userBudgets
+
+    def _getUserPreference(self):
+        # 获取用户交互item集合
+        for key, values in self.seq.items():
+            items = [item[0] for item in values]
+            if key not in self.userPreference:
+                self.userPreference[key] = items
 
 class BudgetPolicy(nn.Module):
     def __init__(self, input_dim, output_dim):
@@ -134,7 +148,7 @@ class BlockPolicy(nn.Module):
         super(BlockPolicy, self).__init__()
         self.fc = nn.Sequential(
             nn.Linear(input_dim, output_dim),
-            nn.BatchNorm1d(output_dim),
+            # nn.BatchNorm1d(output_dim),
             nn.ReLU(),
             nn.Softmax()
         )
@@ -151,13 +165,10 @@ class BudgetNet(nn.Module):
     # 以用户embedding初始化h_0
     # 以上一时刻的item embeddin作为输入
     # 预测下一时刻的budget
-    def __init__(self, user_num, user_dim, item_num, item_dim, budget_dim, gru_hidden_size):
+    def __init__(self,item_num, item_dim, budget_dim, gru_hidden_size):
         super(BudgetNet, self).__init__()
         # item嵌入矩阵
         self.item_em = nn.Embedding(item_num, item_dim).to(device)
-
-        # user 嵌入矩阵item
-        self.user_em = nn.Embedding(user_num, user_dim).to(device)
 
         self.gru = nn.GRUCell(input_size=item_dim, hidden_size=gru_hidden_size)
 
@@ -349,7 +360,8 @@ def evaluate(goldens, selected_block_ids, selected_item_dist, budget_blocks, TOP
             if goldens[i] == selected_block[dist[j][0]]:
                 h_count += 1
     print(h_count)
-    hr = h_count/len(goldens)
+    print(len(goldens))
+    hr = round(h_count/len(goldens), 5)
 
     # 计算 map
     map_= 0.0

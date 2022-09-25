@@ -38,7 +38,7 @@ with open("./dp.pkl", "rb") as f:
 # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 device = torch.device("cpu")
 
-TOPN = 200
+TOPN = 20
 DATA_PATH = '../dataset/filtered_data.csv'
 BATCH_SIZE = 128
 GAMMA = 0.9
@@ -61,21 +61,16 @@ item_price.extend([(-1, float("inf"))]*(BLOCK_SIZE-TAIL_BLOCK_SIZE))
 budget_blocks = item_split(item_price, BLOCK_SIZE)
 
 class Actor(object):
-    def __init__(self,user_num, user_dim, item_num, item_dim, item_price, user_budegt, budget_blocks):
-        self.user_num = user_num
-        self.user_dim = user_dim
+    def __init__(self,item_num, item_dim, item_price, budget_blocks):
         self.item_num = item_num
         self.item_dim = item_dim
         self.item_price = item_price  # sorted [(item_id, item_price),(),......]
-        self.user_budget = user_budegt  # user budgets
-        self.budget_blocks_action_memory = None
-        self.item_action_memory = []
+        self.blocks_selected_memory = []
+        self.item_selected_memory = []
         self.budget_blocks = budget_blocks
 
         # 根据state生成budgets
         self.budget_net = BudgetNet(
-            user_num=self.user_num,
-            user_dim=user_dim,
             item_num=item_num,
             item_dim=item_dim,
             budget_dim=BUDGET_DIM,
@@ -141,7 +136,7 @@ class Actor(object):
                 reward += 0.1
             elif selected_item_prices[i] < user_budgets[i][1] and selected_item_prices[i]>user_budgets[i][0]:
                 reward += 0.05
-
+# 过去决策item、budget表征、剩下的item的表征（验证budget，）
         return budgets, item_dists, selected_item_ids, reward, selected_block_ids
 
     def learn(self,item_id, item_dist, td_error):

@@ -5,6 +5,7 @@ import math
 import time
 import json
 import numpy as np
+np.warnings.filterwarnings('ignore', category=np.VisibleDeprecationWarning)
 import pandas as pd
 import torch
 import torch.nn as nn
@@ -12,149 +13,163 @@ import torch.nn.functional as F
 import torch.utils.data
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
 from torch.distributions import Categorical
-from AC4Rec.utils import DataPre, Voc, data_split, ItemPolicy, BudgetNet, item_split, action_select, action_distribution, data_loader, pad_and_cut, BlockPolicy, category_sampling
+from AC4Rec.utils import DataPre, Voc, data_split, BlockPolicy, ItemPolicy, BudgetNet, item_split, action_select, action_distribution, data_loader, pad_and_cut, BudgetPolicy, category_sampling, evaluate
+from sklearn.metrics._ranking import label_ranking_average_precision_score
+
 
 # # data prepare
-# # df = pd.read_csv('../dataset/filtered_data.csv')
-# # basetime = datetime.datetime.strptime(df['出价时间'].min(), '%Y-%m-%d')
-# # # 将出价时间设置为与basetime的差
-# # df['出价时间'] = df['出价时间'].apply(lambda x: (datetime.datetime.strptime(x, '%Y-%m-%d') - basetime).days)
-# #
-# # dp = DataPre(df)
-# #
-# # f = open("./dp.pkl", "wb")
-# # pickle.dump(dp, f)
-# # f.close()
+# df = pd.read_csv('../dataset/filtered_data.csv')
+# basetime = datetime.datetime.strptime(df['出价时间'].min(), '%Y-%m-%d')
+# # 将出价时间设置为与basetime的差
+# df['出价时间'] = df['出价时间'].apply(lambda x: (datetime.datetime.strptime(x, '%Y-%m-%d') - basetime).days)
+#
+# dp = DataPre(df)
+#
+# f = open("./dp.pkl", "wb")
+# pickle.dump(dp, f)
+# f.close()
 
 print("loading dataset...")
 with open("./dp.pkl", "rb") as f:
     dp = pickle.load(f)
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cpu")
+
+TOPN = 20
 DATA_PATH = '../dataset/filtered_data.csv'
-BATCH_SIZE = 32
+BATCH_SIZE = 1
 GAMMA = 0.9
-LR = 5e-3
+LR = 1e-3
 # ITEM_DIM == USER_DIM == BUDGET_DIM
-ITEM_DIM = 256
-USER_DIM = 256
-BUDGET_DIM = 256
+ITEM_DIM = 512
+USER_DIM = 512
+BUDGET_DIM = 512
+BLOCK_DIM = 512
 GRU_HIDDEN_SIZE = 512
-EPOCH = 30
+EPOCH = 100
 BLOCK_SIZE = 256
 BLOCK_NUM = math.ceil(dp.itemVoc.num_words/BLOCK_SIZE)
-BLOCK_DIM = 256
+TAIL_BLOCK_SIZE = dp.itemVoc.num_words % BLOCK_SIZE
+
 print("split budgets...")
 item_price = list(enumerate(dp.itemPrice))
 item_price.sort(key=lambda x: x[1])
+item_price.extend([(-1, float("inf"))]*(BLOCK_SIZE-TAIL_BLOCK_SIZE))
 budget_blocks = item_split(item_price, BLOCK_SIZE)
-TAIL_BLOCK_SIZE = len(budget_blocks[-1])
-
-
 
 class Actor(object):
-    def __init__(self,item_price, user_budegt, budget_blocks):
+    def __init__(self,item_num, item_dim, item_price, budget_blocks):
+        self.item_num = item_num
+        self.item_dim = item_dim
+        self.gru_init_hidden = torch.zeros(size=(BATCH_SIZE, GRU_HIDDEN_SIZE))
         self.item_price = item_price  # sorted [(item_id, item_price),(),......]
-        self.user_budget = user_budegt  # user budgets
+        self.blocks_selected_memory = []
+        self.item_selected_memory = []
         self.budget_blocks = budget_blocks
-        self.item_action_memory = []
 
-        # 为每一个block使用一个嵌入向量
-        self.block_em = nn.Embedding(BLOCK_NUM, BLOCK_DIM)
-
-        # 根据state生成budgets
+        # 预测用户budgets
         self.budget_net = BudgetNet(
-            user_num=dp.userVoc.num_words,
-            user_dim=USER_DIM,
-            item_num=dp.itemVoc.num_words,
-            item_dim=ITEM_DIM,
+            item_num=item_num,
+            item_dim=item_dim,
             budget_dim=BUDGET_DIM,
             gru_hidden_size=GRU_HIDDEN_SIZE).to(device)
 
-        # 根据budget选择block
-        self.block_policy = BlockPolicy(input_dim=BUDGET_DIM, output_dim=BLOCK_NUM).to(device)
-        # 根据选择的block和budget选择item
-        self.item_policy = ItemPolicy(input_dim=BUDGET_DIM, block_dim = BLOCK_DIM, output_dim=BLOCK_SIZE)
-        self.tail_item_policy = ItemPolicy(input_dim=BUDGET_DIM, block_dim=BLOCK_DIM, output_dim=TAIL_BLOCK_SIZE)
+        self.blockPolicy = BlockPolicy(input_dim=BUDGET_DIM, output_dim=BLOCK_NUM).to(device)
+
+        self.itemPolicy = ItemPolicy(BLOCK_DIM, BLOCK_SIZE, BLOCK_NUM).to(device)
 
         # 优化器
-        # self.budget_policy_optim = torch.optim.Adam([{"params":net.parameters()} for net in self.budget_policys], lr=LR, weight_decay=0.05)
-        self.budget_policy_optim = torch.optim.Adam(self.budget_policy.parameters(), lr=LR, weight_decay=0.05)
-        self.budget_net_optim = torch.optim.Adam(self.budget_net.parameters(), lr=LR, weight_decay=0.05)
-        self.item_policy_optim = torch.optim.Adam([{"params":net.parameters()} for net in self.item_policys], lr=LR, weight_decay=0.05)
+        self.budget_net_optim = torch.optim.Adam(self.budget_net.parameters(), lr=LR)
+        self.blockPolicy_optim = torch.optim.Adam(self.blockPolicy.parameters(), lr=LR)
+        self.itemPolicy_optim = torch.optim.Adam(self.itemPolicy.parameters(), lr=LR)
 
+    def genPolicys(self):
+        # budget_policys = []
+        item_policys = []
 
-    def choose_action(self, cur_item_id, gold_item_id, user_id):
+        # 按照BLOCK_NUM的大小生成budget范围选择策略网络
+        # for i in range(math.ceil(math.log(BLOCK_NUM, 2))):
+        #     budget_policys.append(Policy(BUDGET_DIM).to(device))
+
+        # 按照BLOCK_SIZE大小生成item选择策略网络
+        for i in range(math.ceil(math.log(BLOCK_SIZE, 2))):
+            # item_policys.append(Policy(BUDGET_DIM).to(device))
+            pass
+
+        # self.budget_policys = budget_policys
+        self.item_policys = item_policys
+
+    def choose_action(self, cur_item_ids, golden_item_ids, user_ids):
+        """
+        :param cur_item_id: [batch_size]
+        :param gold_item_id: [batch_size]
+        :param user_id: [batch_size]
+        :return:
+        """
         # 估计用户的预算  [budget_dim]
-        if len(self.item_action_memory) != 0:
-            pre_item_id = self.item_action_memory[-1]
-        else:
-            pre_item_id = None
-
-        budget = self.budget_net(pre_item_id, cur_item_id, user_id)
+        #[batch_size, budget_dim]
+        budgets = self.budget_net(cur_item_ids)
 
         # 根据budget选择budget_block
-        budget_blocks_dist = self.block_policy(budget)
-        selected_budget_block_id = category_sampling(budget_blocks_dist)
-        selected_budget_block_prob = budget_blocks_dist[0][selected_budget_block_id]
+        # [batch_size, block_num]
+        blocks_dists = self.blockPolicy(budgets)
+        # for p in self.blockPolicy.parameters():
+        #     print(p)
+        # print(blocks_dists)
+        selected_block_ids = list(map(category_sampling, blocks_dists))
+        selected_block_probs =[blocks_dists[key][value].unsqueeze(dim=0) for key, value in enumerate(selected_block_ids)]
 
         # 根据budgets选择item
-        if selected_budget_block_id == len(self.budget_blocks)-1: # 选择了最后一个budgets_block
-            self.tail_item_policy()
-        else:
-            self.item_policy()
-
-        selected_item_id, selected_item_prob = action_select(budget, len(self.budget_blocks[selected_budget_block_id]), self.item_policys)
-        self.item_action_memory.append(selected_item_id)
-
+        item_dists = self.itemPolicy(budgets, selected_block_ids, BLOCK_NUM, BLOCK_SIZE, TAIL_BLOCK_SIZE)
         # 计算item_action的概率分布
-        item_action_dist = action_distribution(budget,len(self.budget_blocks[selected_budget_block_id]),self.item_policys, prob=selected_budget_block_prob)
-
+        selected_block_probs = torch.concat(selected_block_probs,dim=0).unsqueeze(dim=1)
+        selected_item_ids = list(map(category_sampling, item_dists))
+        item_dists = selected_block_probs * item_dists
         # 根据预测出来item和gold_item的相似度(这里选择的是价格差)设计reward。
-        selected_item_price = dp.itemPrice[self.budget_blocks[selected_budget_block_id][selected_item_id][0]]
-        user_budget = self.user_budget[user_id]
-        if self.budget_blocks[selected_budget_block_id][selected_item_id][0] == gold_item_id:
-            reward = 0.1
-        elif selected_item_price < user_budget[1] and selected_item_price>user_budget[0]:
-            reward = 0.05
-        else:
-            reward = 0
-
-        return budget, item_action_dist, selected_item_id, reward
+        reward = 0
+        selected_item_prices = [self.budget_blocks[selected_block_ids[i]][selected_item_ids[i]][1] for i in range(len(selected_item_ids))]
+        user_budgets = [self.user_budget[user_id] for user_id in user_ids]
+        for i in range(len(selected_item_ids)):
+            if self.budget_blocks[selected_block_ids[i]][selected_item_ids[i]][0] == golden_item_ids[i]:
+                reward += 0.1
+            elif selected_item_prices[i] < user_budgets[i][1] and selected_item_prices[i]>user_budgets[i][0]:
+                reward += 0.05
+        # 过去决策item、budget表征、剩下的item的表征（验证budget，）
+        return budgets, item_dists, selected_item_ids, reward, selected_block_ids
 
     def learn(self,item_id, item_dist, td_error):
 
         # item_dist = item_dist.squeeze()
         # 当前action
-        selected_item_id = torch.LongTensor([item_id]).to(device)
-        item_dist = torch.concat(item_dist, dim=0)
+        selected_item_id = torch.LongTensor(item_id).to(device)
+        # item_dist = torch.concat(item_dist, dim=0)
 
         l = torch.nn.NLLLoss()
-        log_softmax_input = torch.log(item_dist).unsqueeze(dim=0)
+        log_softmax_input = torch.log(item_dist)
         neg_log_prob = l(log_softmax_input, selected_item_id)
 
-        loss_a = -neg_log_prob * td_error
+        loss_a = torch.sum(-neg_log_prob * td_error)
 
         # 梯度归零
         self.budget_net_optim.zero_grad()
-        self.budget_policy_optim.zero_grad()
-        self.item_policy_optim.zero_grad()
+        self.blockPolicy_optim.zero_grad()
+        self.itemPolicy_optim.zero_grad()
 
         # 计算梯度
         loss_a.backward()
 
         # 梯度裁剪防止梯度爆炸
         nn.utils.clip_grad_norm_(self.budget_net.parameters(), 0.1)
-        # for p in self.budget_policys:
-        #     nn.utils.clip_grad_norm_(p.parameters(), 0.1)
-        nn.utils.clip_grad_norm_(self.budget_policys.parameters(), 0.1)
-        for p in self.item_policys:
-            nn.utils.clip_grad_norm_(p.parameters(), 0.1)
+        nn.utils.clip_grad_norm_(self.blockPolicy.parameters(), 0.1)
+        nn.utils.clip_grad_norm_(self.itemPolicy.parameters(), 0.1)
 
         # 更新参数
         self.budget_net_optim.step()
-        self.budget_policy_optim.step()
-        self.item_policy_optim.step()
+        self.blockPolicy_optim.step()
+        self.itemPolicy_optim.step()
 
 class QNetwork(nn.Module):
     """
@@ -167,14 +182,12 @@ class QNetwork(nn.Module):
         self.fc = nn.Sequential(
             nn.Linear(state_dim, int(0.5 * state_dim)),
             nn.ReLU(),
-            nn.Linear(int(0.5 * state_dim), 32),
-            nn.ReLU(),
-            nn.Linear(32, 1)
+            nn.Linear(int(0.5 * state_dim), 1),
         )
 
     def forward(self, x):
         out = self.fc(x)
-        return out
+        return torch.sum(out)
 
 class Critic(object):
     # 通过采样数据，学习V(S)
@@ -205,7 +218,7 @@ class Critic(object):
         loss_q.backward()
 
         # 梯度裁剪防止梯度爆炸
-        nn.utils.clip_grad_norm_(self.network.parameters(), 1.0)
+        nn.utils.clip_grad_norm_(self.network.parameters(), 0.1)
 
         self.optimizer.step()
         # pytorch老三样
@@ -220,69 +233,123 @@ actor = Actor(user_num=dp.userVoc.num_words,
               user_dim=USER_DIM,
               item_num=dp.itemVoc.num_words,
               item_dim=ITEM_DIM,
-              block_num=BLOCK_NUM,
-              block_dim=BUDGET_DIM,
               item_price=dp.itemPrice,
               user_budegt=dp.userBudgets,
               budget_blocks=budget_blocks)
 
 critic = Critic(input_dim=BUDGET_DIM)
 
-train_data, eval_data = data_split(dp.seq, rate=0.5)
+train_data, valid_data, test_data = data_split(dp.seq)
 
-# 训练
 for epoch in range(EPOCH):
+    print(f"epoch {epoch} :")
+    epoch_time = time.time()
+
     # 设置模型为训练状态
-    for p in actor.item_policys:
-        p.train()
-    # for p in actor.budget_policys:
-    #     p.train()
-    actor.budget_policys.train()
     actor.budget_net.train()
+    actor.blockPolicy.train()
+    actor.itemPolicy.train()
     critic.network.train()
 
-    start = time.time()
-    for uid, eps in list(train_data.items())[:100]:
+    # 评价指标
+    goldens = []
+    selected_blocks = []
+    item_dists = []
+    selected_block_num = 0.0
+    train_rec_count = 0
+    train_total_reword = 0.0
+    for uids, seqs, in data_loader(train_data, BATCH_SIZE):
+
+        # BATCH_SIZE_ = len(uids)
         # 清空memory
-        actor.item_action_memory = []
-        for i in range(len(eps)-1):
-            input_item_id = eps[i][0]
-            gold_item_id = eps[i+1][0]
+        actor.item_selected_memory = []
+        actor.blocks_selected_memory = []
+        # 初始化hidden_state
+        actor.init_hidden = torch.zeros(size=(BATCH_SIZE, GRU_HIDDEN_SIZE))
+        # 裁剪seq
+        min_length = min([len(s) for s in seqs])
+        train_rec_count+=min_length
+        seqs = pad_and_cut(np.array(seqs), min_length)
+        input_item_ids = seqs[:, :-1]
+        golden_item_ids = seqs[:, 1:]
 
-            cur_state, item_dist, item_id_pred, reward = actor.choose_action(cur_item_id=input_item_id,
-                                                                             gold_item_id=gold_item_id,
-                                                                             user_id=uid)
+        for i in range(min_length-1):
+            inputs = input_item_ids[:, i]
+            golden = golden_item_ids[:, i]
+
+            # action_choose_time_start = time.time()
+            budgets, item_action_dists, selected_item_ids, reward, selected_block_ids = actor.choose_action(cur_item_ids=inputs,
+                                                                             golden_item_ids=golden,
+                                                                             user_ids=uids)
+
+            train_total_reword+=reward
+
+            for i in range(len(golden)):
+                b = [item[0] for item in budget_blocks[selected_block_ids[i]]]
+                if golden[i] in b:
+                    selected_block_num += 1
+
+            goldens.extend(golden)
+            selected_blocks.extend(selected_block_ids)
+            item_dists.extend(item_action_dists.tolist())
+
             with torch.no_grad():
-                next_state = actor.budget_net(item_id_pred,gold_item_id,uid)
+                next_budgets = actor.budget_net(selected_item_ids)
 
+            # network_update_time = time.time()
             td_error = critic.train_Q_network(
-                cur_state.clone().detach(),
+                budgets.clone().detach(),
                 reward,
-                next_state)
+                next_budgets)
 
-            actor.learn(item_id_pred, item_dist, td_error)
-            # print("end")
+            actor.learn(selected_item_ids, item_action_dists, td_error)
+            # print(f"network_update_time: {time.time()-network_update_time}\n")
             # true_gradient = grad[logPi(a|s) * td_error]
             # 然后根据前面学到的V（s）值，训练actor，以更好地采样动作
-    total_reward = 0
+    # 评价模型
+    hr, map_, mrr = evaluate(goldens, selected_blocks, item_dists, budget_blocks, TOPN=TOPN)
+    print(f"train_total-reward: {round(train_total_reword, 2)}  train_mrr:{round(mrr, 2)}  train_hr:{round(hr, 2)}  train_map:{round(map_, 2)}  train_block_acc: {selected_block_num/train_rec_count}")
+
+    goldens = []
+    selected_blocks = []
+    item_dists = []
+    selected_block_num = 0
+    valid_rec_count = 0
+    valid_total_reward = 0
     # 设置模型为训练状态
-    for p in actor.item_policys:
-        p.eval()
-    # for p in actor.budget_policys:
-    #     p.eval()
-    actor.budget_policys.eval()
     actor.budget_net.eval()
+    actor.blockPolicy.eval()
+    actor.itemPolicy.eval()
     critic.network.eval()
     # 取消梯度跟踪
     with torch.no_grad():
-        for uid, eps in list(eval_data.items())[:100]:
-            for i in range(len(eps) - 1):  # car_id, 是否中标, 出价金额, 出价时间
-                input_item_id = eps[i][0]
-                gold_item_id = eps[i + 1][0]
+        for uids, seqs in data_loader(valid_data, BATCH_SIZE):
+            # 裁剪seq
+            min_length = min([len(s) for s in seqs])
+            valid_rec_count += min_length
+            seqs = pad_and_cut(np.array(seqs), min_length)
+            input_item_ids = seqs[:, :-1]
+            golden_item_ids = seqs[:, 1:]
+            for i in range(min_length - 1):
+                inputs = input_item_ids[:, i]
+                golden = golden_item_ids[:, i]
 
-                _, _, _, reward = actor.choose_action(cur_item_id=input_item_id,
-                                                      gold_item_id=gold_item_id,
-                                                      user_id=uid)
-                total_reward += reward
-    end = time.time()
-    print(f"epoch:{epoch}  total reward:{total_reward}  time:{round((end-start)/60, 2)}" )
+                # action_choose_time_start = time.time()
+                budgets, item_action_dists, selected_item_ids, reward, selected_block_ids = actor.choose_action(cur_item_ids=inputs,
+                                                                                            golden_item_ids=golden,
+                                                                                            user_ids=uids)
+
+                valid_total_reward += reward
+                # 评价指标
+                for i in range(len(golden)):
+                    if int(golden[i] / BLOCK_SIZE) == selected_block_ids[i]:
+                        selected_block_num += 1
+
+                goldens.extend(golden)
+                selected_blocks.extend(selected_block_ids)
+                item_dists.extend(item_action_dists.tolist())
+    # 评价模型
+    hr, map_, mrr = evaluate(goldens, selected_blocks, item_dists, budget_blocks, TOPN=TOPN)
+    print(f"valid_total-reward: {round(valid_total_reward, 2)} valid_mrr:{round(mrr, 2)}  valid_hr:{round(hr, 2)}  valid_map:{round(map_, 2)} "
+          f"valid_block_acc: {round(selected_block_num/valid_rec_count, 2)} \ntime: {round((time.time() - epoch_time) / 60, 2) }min\n")
+
