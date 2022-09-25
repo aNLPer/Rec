@@ -13,7 +13,7 @@ import torch.nn.functional as F
 import torch.utils.data
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
 from torch.distributions import Categorical
-from AC4Rec.utils import DataPre, Voc, data_split, BlockPolicy, ItemPolicy, BudgetNet, item_split, action_select, action_distribution, data_loader, pad_and_cut, BudgetPolicy, category_sampling, evaluate
+from AC4Rec.utils import DataPre, Voc, data_split, BlockPolicy, ItemPolicy, BudgetNet, item_split, action_select, action_distribution, data_loader, pad_and_cut, category_sampling, evaluate
 from sklearn.metrics._ranking import label_ranking_average_precision_score
 
 
@@ -66,8 +66,7 @@ class Actor(object):
         self.item_dim = item_dim
         self.gru_init_hidden = torch.zeros(size=(BATCH_SIZE, GRU_HIDDEN_SIZE))
         self.item_price = item_price  # sorted [(item_id, item_price),(),......]
-        self.blocks_selected_memory = []
-        self.item_selected_memory = []
+
         self.budget_blocks = budget_blocks
 
         # 预测用户budgets
@@ -229,12 +228,9 @@ class Critic(object):
 
         return td_error
 
-actor = Actor(user_num=dp.userVoc.num_words,
-              user_dim=USER_DIM,
-              item_num=dp.itemVoc.num_words,
+actor = Actor(item_num=dp.itemVoc.num_words,
               item_dim=ITEM_DIM,
               item_price=dp.itemPrice,
-              user_budegt=dp.userBudgets,
               budget_blocks=budget_blocks)
 
 critic = Critic(input_dim=BUDGET_DIM)
@@ -259,13 +255,11 @@ for epoch in range(EPOCH):
     train_rec_count = 0
     train_total_reword = 0.0
     for uids, seqs, in data_loader(train_data, BATCH_SIZE):
-
-        # BATCH_SIZE_ = len(uids)
         # 清空memory
         actor.item_selected_memory = []
         actor.blocks_selected_memory = []
         # 初始化hidden_state
-        actor.init_hidden = torch.zeros(size=(BATCH_SIZE, GRU_HIDDEN_SIZE))
+        actor.budget_net.init_hidden = torch.zeros(size=(BATCH_SIZE, GRU_HIDDEN_SIZE),dtype=torch.float32)
         # 裁剪seq
         min_length = min([len(s) for s in seqs])
         train_rec_count+=min_length

@@ -142,12 +142,15 @@ class BudgetNet(nn.Module):
     # 以用户embedding初始化h_0
     # 以上一时刻的item embeddin作为输入
     # 预测下一时刻的budget
-    def __init__(self,item_num, item_dim, budget_dim, gru_hidden_size, batch_size):
+    def __init__(self,item_num, item_dim, budget_dim, gru_hidden_size):
         super(BudgetNet, self).__init__()
         # item嵌入矩阵
         self.item_em = nn.Embedding(item_num, item_dim).to(device)
+        # 决策轨迹
+        self.blocks_selected_memory = []
+        self.item_selected_memory = []
         # 初始化隐状态
-        self.init_hidden = torch.zeros(size=(batch_size, gru_hidden_size))
+        self.init_hidden = None
 
         self.gru = nn.GRUCell(input_size=item_dim, hidden_size=gru_hidden_size)
 
@@ -168,7 +171,9 @@ class BudgetNet(nn.Module):
 
         # 初始化隐藏状态
         # [batch_size, gru_hidden_size]
-        out = self.gru(cur_item_em)
+        out = self.gru(cur_item_em,self.init_hidden)
+        # 记录
+        self.init_hidden = out
         # [batch_size, budget_dim]
         budget_pred = self.fc(out)
         # [batch_size, budget_dim]

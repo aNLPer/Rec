@@ -13,7 +13,7 @@ import torch.nn.functional as F
 import torch.utils.data
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
 from torch.distributions import Categorical
-from AC4Rec.utils_multiUser import DataPre, Voc, data_split, BlockPolicy, ItemPolicy, BudgetNet, item_split, action_select, action_distribution, data_loader, pad_and_cut, BudgetPolicy, category_sampling, evaluate
+from AC4Rec.utils_multiUser import DataPre, Voc, data_split, BlockPolicy, ItemPolicy, BudgetNet, item_split, action_select, action_distribution, data_loader, pad_and_cut, category_sampling, evaluate
 from sklearn.metrics._ranking import label_ranking_average_precision_score
 
 
@@ -228,12 +228,9 @@ class Critic(object):
 
         return td_error
 
-actor = Actor(user_num=dp.userVoc.num_words,
-              user_dim=USER_DIM,
-              item_num=dp.itemVoc.num_words,
+actor = Actor(item_num=dp.itemVoc.num_words,
               item_dim=ITEM_DIM,
               item_price=dp.itemPrice,
-              user_budegt=dp.userBudgets,
               budget_blocks=budget_blocks)
 
 critic = Critic(input_dim=BUDGET_DIM)
