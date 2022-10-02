@@ -114,19 +114,21 @@ class Actor(object):
 
 
         # reward
-        reward = 0
+        rewards = []
         for selected_block_id, selected_item_in_block_id in zip(selected_block_ids,selected_item_in_block_ids):
+            reward = 0
             selected_item_id = dp.item_blocks[selected_block_id][selected_item_in_block_id][0]
             if selected_block_id in block_ids:
                 reward += 0.1
             if selected_item_id in golden_item_ids:
                 reward += 0.1
+            rewards.append(reward)
 
-        return next_state, selected_item_in_block_id, selected_item_dist, reward, selected_item_id, selected_block_id
+        return next_state, selected_item_in_block_ids, selected_item_dist, rewards, selected_item_id, selected_block_ids
 
     #next_state, selected_item_in_block_id, selected_item_dist, reward, selected_item_id
 
-    def learn(self,selected_item_dist, selected_item_in_block_id, td_error):
+    def learn(self,selected_item_dist, selected_item_in_block_id, td_error, selected_block_id, golden_item_block):
 
         # 损失含函数
         l = torch.nn.NLLLoss()
@@ -256,23 +258,25 @@ for epoch in range(EPOCH):
         # golden_iids = golden_item_ids[:, i:]
         # block_ids = golden_item_block[:, i:]
         # cur_state
-        cur_state = actor.item_net.init_hidden
+        init_state = actor.item_net.init_hidden
         # action_choose_time_start = time.time()
-        next_state, selected_item_in_block_id, selected_item_dist, reward, selected_item_id, selected_block_id  = actor.choose_action(cur_item_id=input_item_ids,
+        next_state, selected_item_in_block_ids, selected_item_dist, rewards, selected_item_id, selected_block_ids = actor.choose_action(cur_item_id=input_item_ids,
                                                                                                 golden_item_ids=golden_item_ids,
                                                                                                 block_ids = golden_item_block)
-
-        train_total_reward+=reward
+        state_list = torch.concat([init_state, next_state], dim=0).tolist()
+        train_total_reward+=sum(rewards)
         # input_iid = selected_item_id
-
         network_update_time = time.time()
-        td_error = critic.train_Q_network(
-            cur_state.tolist(),
-            reward,
-            next_state.tolist())
+        for i in range(len(state_list)-1):
+            cur_state = state_list[i]
+            next_state = state_list[i+1]
+            td_error = critic.train_Q_network(
+                cur_state,
+                rewards[i],
+                next_state)
 
-        actor.learn(selected_item_dist, selected_item_in_block_id, td_error)
-        # print(f"network_update_time: {time.time()-network_update_time}\n")
+            actor.learn(selected_item_dist[i], selected_item_in_block_ids[i], td_error, selected_block_ids, golden_item_block)
+        print(f"network_update_time: {time.time()-network_update_time}\n")
         # true_gradient = grad[logPi(a|s) * td_error]
         # 然后根据前面学到的V（s）值，训练actor，以更好地采样动作
     # 评价模型
