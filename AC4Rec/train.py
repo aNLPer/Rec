@@ -45,9 +45,9 @@ GAMMA = 0.8
 LR = 1e-4
 # ITEM_DIM == USER_DIM == BUDGET_DIM
 ITEM_DIM = 200
-BUDGET_DIM = 200
-BLOCK_DIM = 200
-GRU_HIDDEN_SIZE = 200
+BUDGET_DIM = 512
+BLOCK_DIM = 521
+GRU_HIDDEN_SIZE = 512
 EPOCH = 100
 BLOCK_SIZE = 256
 BLOCK_NUM = math.ceil(dp.itemVoc.num_words/BLOCK_SIZE)
@@ -97,22 +97,34 @@ class Actor(object):
         :return:
         """
         # 计算item分布
+        # [seq_len, 179], [seq_len, 256], [seq_len, 512]
         block_dist, item_dist, next_state = self.item_net(cur_item_id)
-        dist = torch.matmul(block_dist.transpose(dim0=1, dim1=2), item_dist)
+        # dist = torch.matmul(block_dist.transpose(dim0=1, dim1=2), item_dist)
 
-        # 采样
-        selected_block_id = category_sampling(block_dist)
-        selected_item_in_block_id = category_sampling(dist[selected_block_id])
+        # 采样block和item
+        # [seq_len]
+        selected_block_ids = category_sampling(block_dist)
+        # [seq_len]
+        selected_item_in_block_ids = category_sampling(item_dist)
+        # 计算item分布
+        selected_block_prob = torch.concat([block_dist[i][selected_block_ids[i]].unsqueeze(dim=0) for i in range(selected_block_ids.shape[0])]).unsqueeze(dim=1)
+        selected_item_in_block_porb = torch.concat([item_dist[i][selected_item_in_block_ids[i]].unsqueeze(dim=0) for i in range( selected_item_in_block_ids.shape[0])]).unsqueeze(dim=1)
+        selected_item_dist = selected_block_prob.mul(selected_item_in_block_porb)
+
+
 
         # reward
         reward = 0
-        selected_item_id = dp.item_blocks[selected_block_id][selected_item_in_block_id][0]
-        if selected_block_id in block_ids:
-            reward += 0.1
-        if selected_item_id in golden_item_ids:
-            reward += 0.1
+        for selected_block_id, selected_item_in_block_id in zip(selected_block_ids,selected_item_in_block_ids):
+            selected_item_id = dp.item_blocks[selected_block_id][selected_item_in_block_id][0]
+            if selected_block_id in block_ids:
+                reward += 0.1
+            if selected_item_id in golden_item_ids:
+                reward += 0.1
 
-        return next_state, selected_item_in_block_id, dist[selected_block_id], reward, selected_item_id
+        return next_state, selected_item_in_block_id, selected_item_dist, reward, selected_item_id, selected_block_id
+
+    #next_state, selected_item_in_block_id, selected_item_dist, reward, selected_item_id
 
     def learn(self,selected_item_dist, selected_item_in_block_id, td_error):
 
@@ -226,18 +238,18 @@ for epoch in range(EPOCH):
 
     for seqs, blocks in data_loader(train_data, dp.iid2block, BATCH_SIZE): # 426435
         # 初始化hidden_state
-        actor.item_net.init_hidden = torch.zeros(size=(BATCH_SIZE, 1, GRU_HIDDEN_SIZE),dtype=torch.float32)
+        actor.item_net.init_hidden = torch.zeros(size=(1, GRU_HIDDEN_SIZE),dtype=torch.float32)
         # # 裁剪seq
         # min_length = min([len(s) for s in seqs])
         # train_rec_count+=min_length
         # seqs = pad_and_cut(np.array(seqs), min_length)
         # blocks = pad_and_cut(np.array(blocks), min_length)
         # 模型输入x_t
-        input_item_ids = seqs[:, :-1]
+        input_item_ids = seqs[:-1]
         # 监督输出x_t+1
-        golden_item_ids = seqs[:, 1:]
+        golden_item_ids = seqs[1:]
         # 输出所在的block
-        golden_item_block = blocks[:, 1:]
+        golden_item_block = blocks[1:]
 
         # for i in range(min_length-1):
         # input_iid = input_item_ids[:, i]
@@ -246,9 +258,9 @@ for epoch in range(EPOCH):
         # cur_state
         cur_state = actor.item_net.init_hidden
         # action_choose_time_start = time.time()
-        next_state, selected_item_in_block_id, selected_item_dist, reward, selected_item_id  = actor.choose_action(cur_item_id=input_item_ids,
-                                                                                                golden_item_ids=list(golden_item_ids),
-                                                                                                block_ids = list(golden_item_block))
+        next_state, selected_item_in_block_id, selected_item_dist, reward, selected_item_id, selected_block_id  = actor.choose_action(cur_item_id=input_item_ids,
+                                                                                                golden_item_ids=golden_item_ids,
+                                                                                                block_ids = golden_item_block)
 
         train_total_reward+=reward
         # input_iid = selected_item_id

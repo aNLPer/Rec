@@ -151,22 +151,18 @@ class ItemNet(nn.Module):
         # 初始化隐状态
         self.init_hidden = None
 
-        self.gru = nn.GRU(input_size=item_dim, hidden_size=gru_hidden_size, batch_first=False)
+        self.gru = nn.GRU(input_size=item_dim, hidden_size=gru_hidden_size)
 
         # block pred
         self.block_pred = nn.Sequential(
-            nn.Linear(gru_hidden_size, int(0.5*gru_hidden_size)),
-            nn.ReLU(),
-            nn.Linear(int(0.5*gru_hidden_size), block_num),
+            nn.Linear(gru_hidden_size, block_num),
             nn.ReLU(),
             nn.Softmax(dim=1)
         )
 
         # item pred
         self.item_pred = nn.Sequential(
-            nn.Linear(gru_hidden_size, int(0.5*gru_hidden_size)),
-            nn.ReLU(),
-            nn.Linear(int(0.5*gru_hidden_size), block_size),
+            nn.Linear(gru_hidden_size, block_size),
             nn.ReLU(),
             nn.Softmax(dim=1)
         )
@@ -178,12 +174,11 @@ class ItemNet(nn.Module):
         # user_em = self.user_em(torch.LongTensor(user_id).to(device))
         # [batch_size, item_dim]
         cur_item_em = self.item_em(torch.LongTensor(cur_item_id).to(device))
-        cur_item_em = cur_item_em.transpose(dim0=0,dim1=1)
 
         # 初始化隐藏状态
         # [batch_size, gru_hidden_size]
         out,_ = self.gru(cur_item_em, self.init_hidden)
-        self.init_hidden = out.clone().detach()
+        #self.init_hidden = out.clone().detach()
 
         # [batch_size, block_num]
         block_dist = self.block_pred(out)
@@ -316,19 +311,14 @@ def data_loader(data, iid2block, batch_size):
     #     uids.append(uid)
     #     seqs.append([item[0] for item in s])
     num_examples = len(data)
-    indices = list(range(num_examples))
-    for i in range(0, num_examples, batch_size):
-        ids = indices[i: min(i + batch_size, num_examples)]
-        # 最后⼀次可能不⾜⼀个batch
-        item_ids = [data[j] for j in ids]
-        item_blocks = []
-        for seq in item_ids:
-            item_blocks.append([iid2block[i] for i in seq])
-        yield np.array(item_ids), np.array(item_blocks)
+    for i in range(num_examples):
+        seq = data[i]
+        item_blocks = [iid2block[i] for i in seq]
+        yield seq, item_blocks
 
 def category_sampling(prob):
     m = Categorical(prob)
-    return m.sample().item()
+    return m.sample()
 
 def pad_and_cut(data, length):
     """填充或截二维维numpy到固定的长度"""
