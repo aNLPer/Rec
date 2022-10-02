@@ -13,8 +13,10 @@ import torch.nn.functional as F
 import torch.utils.data
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
 from torch.distributions import Categorical
-from AC4Rec.utils import DataPre, Voc, data_split, BlockPolicy, ItemPolicy, BudgetNet, item_split, action_select, action_distribution, data_loader, pad_and_cut, category_sampling, evaluate
+from AC4Rec.utils import DataPre, Voc, data_construction, BlockPolicy, ItemPolicy, ItemNet, item_split, action_select, action_distribution, data_loader, pad_and_cut, category_sampling, evaluate
 from sklearn.metrics._ranking import label_ranking_average_precision_score
+from transformers import get_cosine_with_hard_restarts_schedule_with_warmup, get_cosine_schedule_with_warmup
+
 
 
 # # data prepare
@@ -33,142 +35,107 @@ print("loading dataset...")
 with open("./dp.pkl", "rb") as f:
     dp = pickle.load(f)
 
-
-
 # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 device = torch.device("cpu")
 
-TOPN = 20
+TOPN = 10
 DATA_PATH = '../dataset/filtered_data.csv'
 BATCH_SIZE = 1
-GAMMA = 0.9
-LR = 1e-3
+GAMMA = 0.8
+LR = 1e-4
 # ITEM_DIM == USER_DIM == BUDGET_DIM
-ITEM_DIM = 512
-USER_DIM = 512
-BUDGET_DIM = 512
-BLOCK_DIM = 512
-GRU_HIDDEN_SIZE = 512
+ITEM_DIM = 200
+BUDGET_DIM = 200
+BLOCK_DIM = 200
+GRU_HIDDEN_SIZE = 200
 EPOCH = 100
 BLOCK_SIZE = 256
 BLOCK_NUM = math.ceil(dp.itemVoc.num_words/BLOCK_SIZE)
 TAIL_BLOCK_SIZE = dp.itemVoc.num_words % BLOCK_SIZE
 
-print("split budgets...")
-item_price = list(enumerate(dp.itemPrice))
-item_price.sort(key=lambda x: x[1])
-item_price.extend([(-1, float("inf"))]*(BLOCK_SIZE-TAIL_BLOCK_SIZE))
-budget_blocks = item_split(item_price, BLOCK_SIZE)
+# print("split item to block...")
+# item_price = list(enumerate(dp.itemPrice))# [(iid, price),...]
+# item_price.sort(key=lambda x: x[1])
+# item_price.extend([(-1, float("inf"))]*(BLOCK_SIZE-TAIL_BLOCK_SIZE))
+# item_blocks = item_split(item_price, BLOCK_SIZE)
+# dp.item_blocks = item_blocks
+
+# iid2block = [0]*dp.itemVoc.num_words
+# for block_num in range(len(item_blocks)):
+#     for iid, _ in item_blocks[block_num]:
+#         iid2block[iid] = block_num
+# dp.iid2block = iid2block
 
 class Actor(object):
     def __init__(self,item_num, item_dim, item_price, budget_blocks):
         self.item_num = item_num
         self.item_dim = item_dim
-        self.gru_init_hidden = torch.zeros(size=(BATCH_SIZE, GRU_HIDDEN_SIZE))
         self.item_price = item_price  # sorted [(item_id, item_price),(),......]
-
         self.budget_blocks = budget_blocks
 
         # 预测用户budgets
-        self.budget_net = BudgetNet(
+        self.item_net = ItemNet(
             item_num=item_num,
             item_dim=item_dim,
-            budget_dim=BUDGET_DIM,
+            block_num=BLOCK_NUM,
+            block_size=BLOCK_SIZE,
             gru_hidden_size=GRU_HIDDEN_SIZE).to(device)
 
-        self.blockPolicy = BlockPolicy(input_dim=BUDGET_DIM, output_dim=BLOCK_NUM).to(device)
-
-        self.itemPolicy = ItemPolicy(BLOCK_DIM, BLOCK_SIZE, BLOCK_NUM).to(device)
-
         # 优化器
-        self.budget_net_optim = torch.optim.Adam(self.budget_net.parameters(), lr=LR)
-        self.blockPolicy_optim = torch.optim.Adam(self.blockPolicy.parameters(), lr=LR)
-        self.itemPolicy_optim = torch.optim.Adam(self.itemPolicy.parameters(), lr=LR)
+        self.item_net_optim = torch.optim.Adam(self.item_net.parameters(), lr=LR)
 
-    def genPolicys(self):
-        # budget_policys = []
-        item_policys = []
+        self.scheduler = get_cosine_with_hard_restarts_schedule_with_warmup(self.item_net_optim,
+                                                                            num_warmup_steps=100,
+                                                                            num_training_steps=8000,
+                                                                            num_cycles=1)
 
-        # 按照BLOCK_NUM的大小生成budget范围选择策略网络
-        # for i in range(math.ceil(math.log(BLOCK_NUM, 2))):
-        #     budget_policys.append(Policy(BUDGET_DIM).to(device))
-
-        # 按照BLOCK_SIZE大小生成item选择策略网络
-        for i in range(math.ceil(math.log(BLOCK_SIZE, 2))):
-            # item_policys.append(Policy(BUDGET_DIM).to(device))
-            pass
-
-        # self.budget_policys = budget_policys
-        self.item_policys = item_policys
-
-    def choose_action(self, cur_item_ids, golden_item_ids, user_ids):
+    def choose_action(self, cur_item_id, golden_item_ids, block_ids):
         """
         :param cur_item_id: [batch_size]
         :param gold_item_id: [batch_size]
         :param user_id: [batch_size]
         :return:
         """
-        # 估计用户的预算  [budget_dim]
-        #[batch_size, budget_dim]
-        budgets = self.budget_net(cur_item_ids)
+        # 计算item分布
+        block_dist, item_dist, next_state = self.item_net(cur_item_id)
+        dist = torch.matmul(block_dist.transpose(dim0=1, dim1=2), item_dist)
 
-        # 根据budget选择budget_block
-        # [batch_size, block_num]
-        blocks_dists = self.blockPolicy(budgets)
-        # for p in self.blockPolicy.parameters():
-        #     print(p)
-        # print(blocks_dists)
-        selected_block_ids = list(map(category_sampling, blocks_dists))
-        selected_block_probs =[blocks_dists[key][value].unsqueeze(dim=0) for key, value in enumerate(selected_block_ids)]
+        # 采样
+        selected_block_id = category_sampling(block_dist)
+        selected_item_in_block_id = category_sampling(dist[selected_block_id])
 
-        # 根据budgets选择item
-        item_dists = self.itemPolicy(budgets, selected_block_ids, BLOCK_NUM, BLOCK_SIZE, TAIL_BLOCK_SIZE)
-        # 计算item_action的概率分布
-        selected_block_probs = torch.concat(selected_block_probs,dim=0).unsqueeze(dim=1)
-        selected_item_ids = list(map(category_sampling, item_dists))
-        item_dists = selected_block_probs * item_dists
-        # 根据预测出来item和gold_item的相似度(这里选择的是价格差)设计reward。
+        # reward
         reward = 0
-        selected_item_prices = [self.budget_blocks[selected_block_ids[i]][selected_item_ids[i]][1] for i in range(len(selected_item_ids))]
-        user_budgets = [self.user_budget[user_id] for user_id in user_ids]
-        for i in range(len(selected_item_ids)):
-            if self.budget_blocks[selected_block_ids[i]][selected_item_ids[i]][0] == golden_item_ids[i]:
-                reward += 0.1
-            elif selected_item_prices[i] < user_budgets[i][1] and selected_item_prices[i]>user_budgets[i][0]:
-                reward += 0.05
-        # 过去决策item、budget表征、剩下的item的表征（验证budget，）
-        return budgets, item_dists, selected_item_ids, reward, selected_block_ids
+        selected_item_id = dp.item_blocks[selected_block_id][selected_item_in_block_id][0]
+        if selected_block_id in block_ids:
+            reward += 0.1
+        if selected_item_id in golden_item_ids:
+            reward += 0.1
 
-    def learn(self,item_id, item_dist, td_error):
+        return next_state, selected_item_in_block_id, dist[selected_block_id], reward, selected_item_id
 
-        # item_dist = item_dist.squeeze()
-        # 当前action
-        selected_item_id = torch.LongTensor(item_id).to(device)
-        # item_dist = torch.concat(item_dist, dim=0)
+    def learn(self,selected_item_dist, selected_item_in_block_id, td_error):
 
+        # 损失含函数
         l = torch.nn.NLLLoss()
-        log_softmax_input = torch.log(item_dist)
-        neg_log_prob = l(log_softmax_input, selected_item_id)
-
+        log_softmax_input = torch.log(selected_item_dist).unsqueeze(dim=0)
+        neg_log_prob = l(log_softmax_input, torch.LongTensor([selected_item_in_block_id]))
         loss_a = torch.sum(-neg_log_prob * td_error)
 
         # 梯度归零
-        self.budget_net_optim.zero_grad()
-        self.blockPolicy_optim.zero_grad()
-        self.itemPolicy_optim.zero_grad()
+        self.item_net_optim.zero_grad()
 
         # 计算梯度
         loss_a.backward()
 
         # 梯度裁剪防止梯度爆炸
-        nn.utils.clip_grad_norm_(self.budget_net.parameters(), 0.1)
-        nn.utils.clip_grad_norm_(self.blockPolicy.parameters(), 0.1)
-        nn.utils.clip_grad_norm_(self.itemPolicy.parameters(), 0.1)
+        nn.utils.clip_grad_norm_(self.item_net.parameters(), 0.1)
 
         # 更新参数
-        self.budget_net_optim.step()
-        self.blockPolicy_optim.step()
-        self.itemPolicy_optim.step()
+        self.item_net_optim.step()
+
+        # 更新学习率
+        self.scheduler.step()
 
 class QNetwork(nn.Module):
     """
@@ -198,15 +165,19 @@ class Critic(object):
 
         self.optimizer = torch.optim.Adam(self.network.parameters(), lr=LR)
         self.loss_func = nn.MSELoss()
+        self.scheduler = get_cosine_with_hard_restarts_schedule_with_warmup(self.optimizer,
+                                                                       num_warmup_steps=100,
+                                                                       num_training_steps=8000,
+                                                                       num_cycles=1)
 
     def train_Q_network(self, state, reward, next_state):
         # 类似于DQN的5.4，不过这里没有用fixed network，experience relay的机制
 
-        # s, s_ = torch.FloatTensor(state), torch.FloatTensor(next_state)
+        s, s_ = torch.FloatTensor(state), torch.FloatTensor(next_state)
         # 当前状态，执行了action之后的状态
 
-        v = self.network(state)  # v(s)
-        v_ = self.network(next_state)  # v(s')
+        v = self.network(s)  # v(s)
+        v_ = self.network(s_)  # v(s')
 
         # TD
         # r+γV(S') 和V(S) 之间的差距
@@ -222,6 +193,9 @@ class Critic(object):
         self.optimizer.step()
         # pytorch老三样
 
+        # 更新学习率
+        self.scheduler.step()
+
         with torch.no_grad():
             td_error = reward + GAMMA * v_ - v
         # 表示不把相应的梯度传到actor中（actor和critic是独立训练的）
@@ -231,119 +205,109 @@ class Critic(object):
 actor = Actor(item_num=dp.itemVoc.num_words,
               item_dim=ITEM_DIM,
               item_price=dp.itemPrice,
-              budget_blocks=budget_blocks)
+              budget_blocks=dp.item_blocks)
 
 critic = Critic(input_dim=BUDGET_DIM)
 
-train_data, valid_data, test_data = data_split(dp.seq)
+train_data, valid_data, test_data = data_construction(dp)
+
+
 
 for epoch in range(EPOCH):
     print(f"epoch {epoch} :")
     epoch_time = time.time()
 
     # 设置模型为训练状态
-    actor.budget_net.train()
-    actor.blockPolicy.train()
-    actor.itemPolicy.train()
+    actor.item_net.train()
     critic.network.train()
 
-    # 评价指标
-    goldens = []
-    selected_blocks = []
-    item_dists = []
-    selected_block_num = 0.0
     train_rec_count = 0
-    train_total_reword = 0.0
-    for uids, seqs, in data_loader(train_data, BATCH_SIZE):
-        # 清空memory
-        actor.item_selected_memory = []
-        actor.blocks_selected_memory = []
+    train_total_reward = 0.0
+
+    for seqs, blocks in data_loader(train_data, dp.iid2block, BATCH_SIZE): # 426435
         # 初始化hidden_state
-        actor.budget_net.init_hidden = torch.zeros(size=(BATCH_SIZE, GRU_HIDDEN_SIZE),dtype=torch.float32)
-        # 裁剪seq
-        min_length = min([len(s) for s in seqs])
-        train_rec_count+=min_length
-        seqs = pad_and_cut(np.array(seqs), min_length)
+        actor.item_net.init_hidden = torch.zeros(size=(BATCH_SIZE, 1, GRU_HIDDEN_SIZE),dtype=torch.float32)
+        # # 裁剪seq
+        # min_length = min([len(s) for s in seqs])
+        # train_rec_count+=min_length
+        # seqs = pad_and_cut(np.array(seqs), min_length)
+        # blocks = pad_and_cut(np.array(blocks), min_length)
+        # 模型输入x_t
         input_item_ids = seqs[:, :-1]
+        # 监督输出x_t+1
         golden_item_ids = seqs[:, 1:]
+        # 输出所在的block
+        golden_item_block = blocks[:, 1:]
 
-        for i in range(min_length-1):
-            inputs = input_item_ids[:, i]
-            golden = golden_item_ids[:, i]
+        # for i in range(min_length-1):
+        # input_iid = input_item_ids[:, i]
+        # golden_iids = golden_item_ids[:, i:]
+        # block_ids = golden_item_block[:, i:]
+        # cur_state
+        cur_state = actor.item_net.init_hidden
+        # action_choose_time_start = time.time()
+        next_state, selected_item_in_block_id, selected_item_dist, reward, selected_item_id  = actor.choose_action(cur_item_id=input_item_ids,
+                                                                                                golden_item_ids=list(golden_item_ids),
+                                                                                                block_ids = list(golden_item_block))
 
-            # action_choose_time_start = time.time()
-            budgets, item_action_dists, selected_item_ids, reward, selected_block_ids = actor.choose_action(cur_item_ids=inputs,
-                                                                             golden_item_ids=golden,
-                                                                             user_ids=uids)
+        train_total_reward+=reward
+        # input_iid = selected_item_id
 
-            train_total_reword+=reward
+        network_update_time = time.time()
+        td_error = critic.train_Q_network(
+            cur_state.tolist(),
+            reward,
+            next_state.tolist())
 
-            for i in range(len(golden)):
-                b = [item[0] for item in budget_blocks[selected_block_ids[i]]]
-                if golden[i] in b:
-                    selected_block_num += 1
-
-            goldens.extend(golden)
-            selected_blocks.extend(selected_block_ids)
-            item_dists.extend(item_action_dists.tolist())
-
-            with torch.no_grad():
-                next_budgets = actor.budget_net(selected_item_ids)
-
-            # network_update_time = time.time()
-            td_error = critic.train_Q_network(
-                budgets.clone().detach(),
-                reward,
-                next_budgets)
-
-            actor.learn(selected_item_ids, item_action_dists, td_error)
-            # print(f"network_update_time: {time.time()-network_update_time}\n")
-            # true_gradient = grad[logPi(a|s) * td_error]
-            # 然后根据前面学到的V（s）值，训练actor，以更好地采样动作
+        actor.learn(selected_item_dist, selected_item_in_block_id, td_error)
+        # print(f"network_update_time: {time.time()-network_update_time}\n")
+        # true_gradient = grad[logPi(a|s) * td_error]
+        # 然后根据前面学到的V（s）值，训练actor，以更好地采样动作
     # 评价模型
-    hr, map_, mrr = evaluate(goldens, selected_blocks, item_dists, budget_blocks, TOPN=TOPN)
-    print(f"train_total-reward: {round(train_total_reword, 2)}  train_mrr:{round(mrr, 2)}  train_hr:{round(hr, 2)}  train_map:{round(map_, 2)}  train_block_acc: {selected_block_num/train_rec_count}")
+    print(f"training-total-reward:{train_total_reward}")
+    # hr, map_, mrr = evaluate(goldens, selected_blocks, item_dists, dp.item_blocks, TOPN=TOPN)
+    # print(f"train_total-reward: {round(train_total_reword, 2)}  train_mrr:{round(mrr, 2)}  train_hr:{round(hr, 2)}  train_map:{round(map_, 2)}  train_block_acc: {selected_block_num/train_rec_count}")
 
-    goldens = []
-    selected_blocks = []
-    item_dists = []
-    selected_block_num = 0
-    valid_rec_count = 0
     valid_total_reward = 0
     # 设置模型为训练状态
-    actor.budget_net.eval()
-    actor.blockPolicy.eval()
-    actor.itemPolicy.eval()
-    critic.network.eval()
+    actor.item_net.eval()
     # 取消梯度跟踪
     with torch.no_grad():
-        for uids, seqs in data_loader(valid_data, BATCH_SIZE):
-            # 裁剪seq
-            min_length = min([len(s) for s in seqs])
-            valid_rec_count += min_length
-            seqs = pad_and_cut(np.array(seqs), min_length)
-            input_item_ids = seqs[:, :-1]
-            golden_item_ids = seqs[:, 1:]
-            for i in range(min_length - 1):
-                inputs = input_item_ids[:, i]
-                golden = golden_item_ids[:, i]
+        topn_rec = 0
+        rec_count = 0
+        for seqs, blocks in data_loader(valid_data, dp.iid2block, BATCH_SIZE):
+            rec_count+=1
+            for _ in range(TOPN):
+                # 初始化hidden_state
+                actor.item_net.init_hidden = torch.zeros(size=(BATCH_SIZE, GRU_HIDDEN_SIZE), dtype=torch.float32)
+                # 裁剪seq
+                min_length = min([len(s) for s in seqs])
+                seqs = pad_and_cut(np.array(seqs), min_length)
+                blocks = pad_and_cut(np.array(blocks), min_length)
+                # 模型输入x_t
+                input_item_ids = seqs[:, :-1]
+                # 监督输出x_t+1
+                golden_item_ids = seqs[:, 1:]
+                # 输出所在的block
+                golden_item_block = blocks[:, 1:]
 
-                # action_choose_time_start = time.time()
-                budgets, item_action_dists, selected_item_ids, reward, selected_block_ids = actor.choose_action(cur_item_ids=inputs,
-                                                                                            golden_item_ids=golden,
-                                                                                            user_ids=uids)
+                for i in range(min_length - 1):
+                    input_iid = input_item_ids[:, i]
+                    golden_iids = golden_item_ids[:, i:]
+                    block_ids = golden_item_block[:, i:]
+                    # cur_state
+                    cur_state = actor.item_net.init_hidden
+                    # action_choose_time_start = time.time()
+                    next_state, selected_item_in_block_id, selected_item_dist, reward, selected_item_id = actor.choose_action(cur_item_id=input_iid,
+                                                                                                            golden_item_ids=list(golden_iids[0]),
+                                                                                                            block_ids=list(block_ids[0]))
+                    if i == (min_length - 2) and selected_item_id == golden_item_ids[0][-1]:
+                        topn_rec+=1
 
-                valid_total_reward += reward
-                # 评价指标
-                for i in range(len(golden)):
-                    if int(golden[i] / BLOCK_SIZE) == selected_block_ids[i]:
-                        selected_block_num += 1
-
-                goldens.extend(golden)
-                selected_blocks.extend(selected_block_ids)
-                item_dists.extend(item_action_dists.tolist())
+                    valid_total_reward += reward
     # 评价模型
-    hr, map_, mrr = evaluate(goldens, selected_blocks, item_dists, budget_blocks, TOPN=TOPN)
-    print(f"valid_total-reward: {round(valid_total_reward, 2)} valid_mrr:{round(mrr, 2)}  valid_hr:{round(hr, 2)}  valid_map:{round(map_, 2)} "
-          f"valid_block_acc: {round(selected_block_num/valid_rec_count, 2)} \ntime: {round((time.time() - epoch_time) / 60, 2) }min\n")
+    print(f"rec_counts: {topn_rec/rec_count}, total_reword:{valid_total_reward} ")
+    # hr, map_, mrr = evaluate(goldens, selected_blocks, item_dists, dp.item_blocks, TOPN=TOPN)
+    # print(f"valid_total-reward: {round(valid_total_reward, 2)} valid_mrr:{round(mrr, 2)}  valid_hr:{round(hr, 2)}  valid_map:{round(map_, 2)} "
+    #       f"valid_block_acc: {round(selected_block_num/valid_rec_count, 2)} \ntime: {round((time.time() - epoch_time) / 60, 2) }min\n")
 

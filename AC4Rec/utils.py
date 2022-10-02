@@ -93,7 +93,7 @@ class DataPre:
     def _getUserPreference(self):
         # 获取用户交互item集合
         for key, values in self.seq.items():
-            items = [item[0] for item in values]
+            items = list(set([item[0] for item in values]))
             if key not in self.userPreference:
                 self.userPreference[key] = items
 
@@ -125,7 +125,6 @@ class BlockPolicy(nn.Module):
         super(BlockPolicy, self).__init__()
         self.fc = nn.Sequential(
             nn.Linear(input_dim, output_dim),
-            # nn.BatchNorm1d(output_dim),
             nn.ReLU(),
             nn.Softmax()
         )
@@ -138,27 +137,38 @@ class BlockPolicy(nn.Module):
         return out
 
 # 预测用户的budget
-class BudgetNet(nn.Module):
-    # 以用户embedding初始化h_0
+class ItemNet(nn.Module):
     # 以上一时刻的item embeddin作为输入
     # 预测下一时刻的budget
-    def __init__(self,item_num, item_dim, budget_dim, gru_hidden_size):
-        super(BudgetNet, self).__init__()
+    def __init__(self,item_num, item_dim, block_num, block_size ,gru_hidden_size):
+        super(ItemNet, self).__init__()
         # item嵌入矩阵
         self.item_em = nn.Embedding(item_num, item_dim).to(device)
         # 决策轨迹
         self.blocks_selected_memory = []
         self.item_selected_memory = []
+
         # 初始化隐状态
         self.init_hidden = None
 
-        self.gru = nn.GRUCell(input_size=item_dim, hidden_size=gru_hidden_size)
+        self.gru = nn.GRU(input_size=item_dim, hidden_size=gru_hidden_size, batch_first=False)
 
-        # self.gru = nn.GRU(input_size=item_dim, hidden_size=gru_hidden_size)
-        self.fc = nn.Sequential(
+        # block pred
+        self.block_pred = nn.Sequential(
             nn.Linear(gru_hidden_size, int(0.5*gru_hidden_size)),
             nn.ReLU(),
-            nn.Linear(int(0.5*gru_hidden_size), budget_dim)
+            nn.Linear(int(0.5*gru_hidden_size), block_num),
+            nn.ReLU(),
+            nn.Softmax(dim=1)
+        )
+
+        # item pred
+        self.item_pred = nn.Sequential(
+            nn.Linear(gru_hidden_size, int(0.5*gru_hidden_size)),
+            nn.ReLU(),
+            nn.Linear(int(0.5*gru_hidden_size), block_size),
+            nn.ReLU(),
+            nn.Softmax(dim=1)
         )
 
     def forward(self, cur_item_id):
@@ -168,19 +178,20 @@ class BudgetNet(nn.Module):
         # user_em = self.user_em(torch.LongTensor(user_id).to(device))
         # [batch_size, item_dim]
         cur_item_em = self.item_em(torch.LongTensor(cur_item_id).to(device))
+        cur_item_em = cur_item_em.transpose(dim0=0,dim1=1)
 
         # 初始化隐藏状态
         # [batch_size, gru_hidden_size]
-        out = self.gru(cur_item_em,self.init_hidden)
-        # 记录
-        self.init_hidden = out
-        # [batch_size, budget_dim]
-        budget_pred = self.fc(out)
-        # [batch_size, budget_dim]
-        return budget_pred
+        out,_ = self.gru(cur_item_em, self.init_hidden)
+        self.init_hidden = out.clone().detach()
 
+        # [batch_size, block_num]
+        block_dist = self.block_pred(out)
 
+        # [batch_size, item_in_block_num]
+        item_dist = self.item_pred(out)
 
+        return block_dist, item_dist, out
 
 def item_split(items_price, step):
     num_items = len(items_price)
@@ -191,13 +202,15 @@ def item_split(items_price, step):
         splited_item.append([items_price[i] for i in ids])
     return splited_item
 
-
-def data_split(data, shuffe=False):
+def data_construction(dp, shuffe=True):
+    data = dp.seq
     train_data = []
     valid_data = []
     test_data = []
     data = list(data.items())
-    data.sort(key=lambda x:len(x[1]), reverse=False)
+    # if shuffe:
+    #     random.shuffle(data)
+    #data.sort(key=lambda x:len(x[1]), reverse=False)
     indices = list(range(len(data)))
     if shuffe:# 打乱数据
         np.random.shuffle(indices)
@@ -210,19 +223,24 @@ def data_split(data, shuffe=False):
     test_data_ = [data[i] for i in test_indices]
 
     for sample in train_data_:
-        item = [sample[0]]
-        item.append([item[0] for item in sample[1]])
-        train_data.append(item)
+        # item = [sample[0]]
+        # item.append([item[0] for item in sample[1]])
+        train_data.append([item[0] for item in sample[1]])
 
     for sample in valid_data_:
-        item = [sample[0]]
-        item.append([item[0] for item in sample[1]])
-        valid_data.append(item)
+        # item = [sample[0]]
+        # item.append([item[0] for item in sample[1]])
+        valid_data.append([item[0] for item in sample[1]])
 
     for sample in test_data_:
-        item = [sample[0]]
-        item.append([item[0] for item in sample[1]])
-        test_data.append(item)
+        # item = [sample[0]]
+        # item.append([item[0] for item in sample[1]])
+        test_data.append([item[0] for item in sample[1]])
+
+    for seq in valid_data:
+        train_data.append(seq[:-1])
+    for seq in test_data:
+        train_data.append(seq[:-1])
 
     return train_data, valid_data, test_data
 
@@ -284,7 +302,7 @@ def action_distribution(state, action_num, policys, prob = None):
 
     return item_in_block_dist
 
-def data_loader(data, batch_size):
+def data_loader(data, iid2block, batch_size):
     """
     :param data: dict
     :param batch_size: batch_size
@@ -302,7 +320,11 @@ def data_loader(data, batch_size):
     for i in range(0, num_examples, batch_size):
         ids = indices[i: min(i + batch_size, num_examples)]
         # 最后⼀次可能不⾜⼀个batch
-        yield [data[j][0] for j in ids], [data[j][1] for j in ids]
+        item_ids = [data[j] for j in ids]
+        item_blocks = []
+        for seq in item_ids:
+            item_blocks.append([iid2block[i] for i in seq])
+        yield np.array(item_ids), np.array(item_blocks)
 
 def category_sampling(prob):
     m = Categorical(prob)
