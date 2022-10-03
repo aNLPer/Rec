@@ -108,39 +108,41 @@ class Actor(object):
         selected_item_in_block_ids = category_sampling(item_dist)
         # 计算item分布
         selected_block_prob = torch.concat([block_dist[i][selected_block_ids[i]].unsqueeze(dim=0) for i in range(selected_block_ids.shape[0])]).unsqueeze(dim=1)
-        selected_item_in_block_porb = torch.concat([item_dist[i][selected_item_in_block_ids[i]].unsqueeze(dim=0) for i in range( selected_item_in_block_ids.shape[0])]).unsqueeze(dim=1)
-        selected_item_dist = selected_block_prob.mul(selected_item_in_block_porb)
-
-
+        # selected_item_in_block_porb = torch.concat([item_dist[i][selected_item_in_block_ids[i]].unsqueeze(dim=0) for i in range( selected_item_in_block_ids.shape[0])]).unsqueeze(dim=1)
+        selected_item_dist = selected_block_prob.mul(item_dist)
 
         # reward
         rewards = []
+        selected_item_ids = []
         for selected_block_id, selected_item_in_block_id in zip(selected_block_ids,selected_item_in_block_ids):
             reward = 0
             selected_item_id = dp.item_blocks[selected_block_id][selected_item_in_block_id][0]
+            selected_item_ids.append(selected_item_id)
             if selected_block_id in block_ids:
                 reward += 0.1
             if selected_item_id in golden_item_ids:
                 reward += 0.1
             rewards.append(reward)
 
-        return next_state, selected_item_in_block_ids, selected_item_dist, rewards, selected_item_id, selected_block_ids
+        return next_state, selected_item_in_block_ids, selected_item_dist, rewards, block_dist, selected_item_ids
 
     #next_state, selected_item_in_block_id, selected_item_dist, reward, selected_item_id
 
-    def learn(self,selected_item_dist, selected_item_in_block_id, td_error, selected_block_id, golden_item_block):
+    def learn(self,selected_item_dist, selected_item_in_block_id, td_error, block_dist, golden_block_id):
 
         # 损失含函数
         l = torch.nn.NLLLoss()
-        log_softmax_input = torch.log(selected_item_dist).unsqueeze(dim=0)
-        neg_log_prob = l(log_softmax_input, torch.LongTensor([selected_item_in_block_id]))
+        ce = torch.nn.CrossEntropyLoss()
+        log_softmax_input = torch.log(selected_item_dist)
+        neg_log_prob = l(log_softmax_input, torch.LongTensor(selected_item_in_block_id))
         loss_a = torch.sum(-neg_log_prob * td_error)
-
+        loss_b = ce(block_dist, torch.tensor(golden_block_id, dtype=torch.long))
+        loss = loss_a+loss_b
         # 梯度归零
         self.item_net_optim.zero_grad()
 
         # 计算梯度
-        loss_a.backward()
+        loss.backward()
 
         # 梯度裁剪防止梯度爆炸
         nn.utils.clip_grad_norm_(self.item_net.parameters(), 0.1)
@@ -260,23 +262,24 @@ for epoch in range(EPOCH):
         # cur_state
         init_state = actor.item_net.init_hidden
         # action_choose_time_start = time.time()
-        next_state, selected_item_in_block_ids, selected_item_dist, rewards, selected_item_id, selected_block_ids = actor.choose_action(cur_item_id=input_item_ids,
+        next_state, selected_item_in_block_ids, selected_item_dist, rewards, block_dist, _ = actor.choose_action(cur_item_id=input_item_ids,
                                                                                                 golden_item_ids=golden_item_ids,
                                                                                                 block_ids = golden_item_block)
         state_list = torch.concat([init_state, next_state], dim=0).tolist()
         train_total_reward+=sum(rewards)
         # input_iid = selected_item_id
-        network_update_time = time.time()
-        for i in range(len(state_list)-1):
+        # network_update_time = time.time()
+        td_errors = []
+        for i in range(2):#len(state_list)-1
             cur_state = state_list[i]
             next_state = state_list[i+1]
             td_error = critic.train_Q_network(
                 cur_state,
                 rewards[i],
                 next_state)
-
-            actor.learn(selected_item_dist[i], selected_item_in_block_ids[i], td_error, selected_block_ids, golden_item_block)
-        print(f"network_update_time: {time.time()-network_update_time}\n")
+            td_errors.append(td_error)
+        actor.learn(selected_item_dist, selected_item_in_block_ids, sum(td_errors), block_dist, golden_item_block)
+        # print(f"network_update_time: {time.time()-network_update_time}\n")
         # true_gradient = grad[logPi(a|s) * td_error]
         # 然后根据前面学到的V（s）值，训练actor，以更好地采样动作
     # 评价模型
@@ -291,36 +294,39 @@ for epoch in range(EPOCH):
     with torch.no_grad():
         topn_rec = 0
         rec_count = 0
-        for seqs, blocks in data_loader(valid_data, dp.iid2block, BATCH_SIZE):
+        for seqs, blocks in data_loader(valid_data, dp.iid2block, BATCH_SIZE):  # 426435
             rec_count+=1
+            # 初始化hidden_state
+            actor.item_net.init_hidden = torch.zeros(size=(1, GRU_HIDDEN_SIZE), dtype=torch.float32)
+            # # 裁剪seq
+            # min_length = min([len(s) for s in seqs])
+            # train_rec_count+=min_length
+            # seqs = pad_and_cut(np.array(seqs), min_length)
+            # blocks = pad_and_cut(np.array(blocks), min_length)
+            # 模型输入x_t
+            input_item_ids = seqs[:-1]
+            # 监督输出x_t+1
+            golden_item_ids = seqs[1:]
+            # 输出所在的block
+            golden_item_block = blocks[1:]
+
+            # for i in range(min_length-1):
+            # input_iid = input_item_ids[:, i]
+            # golden_iids = golden_item_ids[:, i:]
+            # block_ids = golden_item_block[:, i:]
+            # cur_state
+            init_state = actor.item_net.init_hidden
+            # action_choose_time_start = time.time()
             for _ in range(TOPN):
-                # 初始化hidden_state
-                actor.item_net.init_hidden = torch.zeros(size=(BATCH_SIZE, GRU_HIDDEN_SIZE), dtype=torch.float32)
-                # 裁剪seq
-                min_length = min([len(s) for s in seqs])
-                seqs = pad_and_cut(np.array(seqs), min_length)
-                blocks = pad_and_cut(np.array(blocks), min_length)
-                # 模型输入x_t
-                input_item_ids = seqs[:, :-1]
-                # 监督输出x_t+1
-                golden_item_ids = seqs[:, 1:]
-                # 输出所在的block
-                golden_item_block = blocks[:, 1:]
+                next_state, selected_item_in_block_ids, selected_item_dist, rewards, block_dist, selected_item_ids = actor.choose_action(
+                                                                                                        cur_item_id=input_item_ids,
+                                                                                                        golden_item_ids=golden_item_ids,
+                                                                                                        block_ids=golden_item_block)
+                if selected_item_ids[-1] in golden_item_ids:
+                    topn_rec+=1
+                valid_total_reward += sum(rewards)
+                # input_iid = selected_item_id
 
-                for i in range(min_length - 1):
-                    input_iid = input_item_ids[:, i]
-                    golden_iids = golden_item_ids[:, i:]
-                    block_ids = golden_item_block[:, i:]
-                    # cur_state
-                    cur_state = actor.item_net.init_hidden
-                    # action_choose_time_start = time.time()
-                    next_state, selected_item_in_block_id, selected_item_dist, reward, selected_item_id = actor.choose_action(cur_item_id=input_iid,
-                                                                                                            golden_item_ids=list(golden_iids[0]),
-                                                                                                            block_ids=list(block_ids[0]))
-                    if i == (min_length - 2) and selected_item_id == golden_item_ids[0][-1]:
-                        topn_rec+=1
-
-                    valid_total_reward += reward
     # 评价模型
     print(f"rec_counts: {topn_rec/rec_count}, total_reword:{valid_total_reward} ")
     # hr, map_, mrr = evaluate(goldens, selected_blocks, item_dists, dp.item_blocks, TOPN=TOPN)
