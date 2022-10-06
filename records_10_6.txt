@@ -1,0 +1,304 @@
+rnn隐藏状态作为agent状态，TOPN=10 rec_counts（hit rate in userpreference）
+
+epoch 0 :
+training-total-reward:16275.100000000291
+rec_counts: 0.014209591474245116, total_reword:30424.399999999372
+epoch 1 :
+training-total-reward:16228.700000000283
+rec_counts: 0.013025458851391355, total_reword:30319.299999999417
+epoch 2 :
+training-total-reward:16263.50000000031
+rec_counts: 0.013617525162818236, total_reword:30274.09999999941
+epoch 3 :
+training-total-reward:16244.40000000036
+rec_counts: 0.012433392539964476, total_reword:30389.59999999926
+epoch 4 :
+training-total-reward:16255.60000000028
+rec_counts: 0.006512729425695678, total_reword:30245.39999999928
+epoch 5 :
+training-total-reward:16303.100000000273
+rec_counts: 0.010657193605683837, total_reword:30342.2999999994
+epoch 6 :
+training-total-reward:16286.50000000037
+rec_counts: 0.013617525162818236, total_reword:30282.999999999116
+epoch 7 :
+training-total-reward:16300.500000000284
+rec_counts: 0.008880994671403197, total_reword:30382.79999999929
+epoch 8 :
+training-total-reward:16259.400000000356
+rec_counts: 0.013025458851391355, total_reword:30292.79999999923
+epoch 9 :
+training-total-reward:16250.20000000033
+rec_counts: 0.010065127294256957, total_reword:30324.19999999924
+epoch 10 :
+training-total-reward:16255.900000000396
+rec_counts: 0.014801657785671996, total_reword:30308.099999999195
+epoch 11 :
+training-total-reward:16269.000000000327
+rec_counts: 0.0076968620485494375, total_reword:30433.299999999417
+epoch 12 :
+training-total-reward:16254.000000000318
+rec_counts: 0.0076968620485494375, total_reword:30331.299999999297
+epoch 13 :
+training-total-reward:16302.600000000377
+rec_counts: 0.010065127294256957, total_reword:30309.299999999253
+epoch 14 :
+training-total-reward:16276.80000000035
+rec_counts: 0.006512729425695678, total_reword:30324.49999999925
+epoch 15 :
+training-total-reward:16246.200000000315
+rec_counts: 0.012433392539964476, total_reword:30337.699999999157
+epoch 16 :
+training-total-reward:16234.600000000266
+rec_counts: 0.011841326228537596, total_reword:30321.499999999276
+epoch 17 :
+training-total-reward:16260.90000000034
+rec_counts: 0.011841326228537596, total_reword:30265.7999999993
+epoch 18 :
+training-total-reward:16281.200000000303
+rec_counts: 0.008880994671403197, total_reword:30246.79999999917
+epoch 19 :
+training-total-reward:16227.500000000335
+rec_counts: 0.010657193605683837, total_reword:30274.099999999235
+epoch 20 :
+training-total-reward:16270.200000000304
+rec_counts: 0.008880994671403197, total_reword:30267.999999999203
+epoch 21 :
+training-total-reward:16266.30000000029
+rec_counts: 0.008880994671403197, total_reword:30239.999999999356
+epoch 22 :
+training-total-reward:16311.700000000359
+rec_counts: 0.019538188277087035, total_reword:30236.599999999242
+epoch 23 :
+training-total-reward:16310.40000000031
+rec_counts: 0.008880994671403197, total_reword:30276.09999999938
+epoch 24 :
+training-total-reward:16248.500000000296
+rec_counts: 0.008288928359976317, total_reword:30339.3999999992
+epoch 25 :
+training-total-reward:16306.000000000275
+rec_counts: 0.011841326228537596, total_reword:30261.599999999362
+epoch 26 :
+training-total-reward:16274.10000000037
+rec_counts: 0.004736530491415038, total_reword:30246.199999999255
+epoch 27 :
+training-total-reward:16242.900000000318
+rec_counts: 0.010065127294256957, total_reword:30383.89999999929
+epoch 28 :
+training-total-reward:16282.600000000328
+rec_counts: 0.011841326228537596, total_reword:30365.399999999314
+epoch 29 :
+training-total-reward:16303.300000000323
+rec_counts: 0.010657193605683837, total_reword:30278.799999999308
+epoch 30 :
+training-total-reward:16303.700000000312
+rec_counts: 0.011249259917110717, total_reword:30255.299999999363
+epoch 31 :
+training-total-reward:16328.00000000032
+rec_counts: 0.011841326228537596, total_reword:30306.599999999245
+epoch 32 :
+training-total-reward:16237.400000000358
+rec_counts: 0.013617525162818236, total_reword:30297.099999999507
+epoch 33 :
+training-total-reward:16279.800000000329
+rec_counts: 0.008880994671403197, total_reword:30180.599999999275
+epoch 34 :
+training-total-reward:16318.000000000318
+rec_counts: 0.007104795737122558, total_reword:30306.199999999237
+epoch 35 :
+training-total-reward:16243.100000000351
+rec_counts: 0.010657193605683837, total_reword:30278.499999999392
+epoch 36 :
+training-total-reward:16290.800000000298
+rec_counts: 0.013025458851391355, total_reword:30350.399999999478
+epoch 37 :
+training-total-reward:16270.900000000296
+rec_counts: 0.011841326228537596, total_reword:30231.39999999936
+epoch 38 :
+training-total-reward:16234.900000000287
+rec_counts: 0.0076968620485494375, total_reword:30273.199999999277
+epoch 39 :
+training-total-reward:16293.100000000288
+rec_counts: 0.010065127294256957, total_reword:30359.499999999312
+epoch 40 :
+training-total-reward:16278.300000000347
+rec_counts: 0.008288928359976317, total_reword:30279.199999999182
+epoch 41 :
+training-total-reward:16291.10000000041
+rec_counts: 0.005920663114268798, total_reword:30249.49999999928
+epoch 42 :
+training-total-reward:16280.700000000297
+rec_counts: 0.008288928359976317, total_reword:30297.899999999303
+epoch 43 :
+training-total-reward:16259.300000000338
+rec_counts: 0.009473060982830076, total_reword:30273.999999999516
+epoch 44 :
+training-total-reward:16252.900000000327
+rec_counts: 0.012433392539964476, total_reword:30296.899999999314
+epoch 45 :
+training-total-reward:16271.000000000306
+rec_counts: 0.006512729425695678, total_reword:30352.99999999931
+epoch 46 :
+training-total-reward:16275.500000000377
+rec_counts: 0.009473060982830076, total_reword:30280.89999999938
+epoch 47 :
+training-total-reward:16356.10000000037
+rec_counts: 0.013025458851391355, total_reword:30309.899999999343
+epoch 48 :
+training-total-reward:16263.700000000292
+rec_counts: 0.011249259917110717, total_reword:30327.19999999915
+epoch 49 :
+training-total-reward:16257.200000000325
+rec_counts: 0.008880994671403197, total_reword:30286.299999999355
+epoch 50 :
+training-total-reward:16331.100000000235
+rec_counts: 0.008288928359976317, total_reword:30231.09999999924
+epoch 51 :
+training-total-reward:16301.600000000302
+rec_counts: 0.010065127294256957, total_reword:30286.49999999936
+epoch 52 :
+training-total-reward:16253.100000000328
+rec_counts: 0.008880994671403197, total_reword:30375.399999999237
+epoch 53 :
+training-total-reward:16270.10000000029
+rec_counts: 0.012433392539964476, total_reword:30327.399999999223
+epoch 54 :
+training-total-reward:16239.300000000318
+rec_counts: 0.009473060982830076, total_reword:30310.99999999914
+epoch 55 :
+training-total-reward:16260.900000000325
+rec_counts: 0.008288928359976317, total_reword:30289.59999999923
+epoch 56 :
+training-total-reward:16276.90000000033
+rec_counts: 0.010657193605683837, total_reword:30289.19999999924
+epoch 57 :
+training-total-reward:16267.900000000325
+rec_counts: 0.008880994671403197, total_reword:30282.399999999365
+epoch 58 :
+training-total-reward:16291.200000000292
+rec_counts: 0.011249259917110717, total_reword:30278.999999999174
+epoch 59 :
+training-total-reward:16230.100000000295
+rec_counts: 0.006512729425695678, total_reword:30305.89999999938
+epoch 60 :
+training-total-reward:16257.400000000342
+rec_counts: 0.012433392539964476, total_reword:30313.799999999268
+epoch 61 :
+training-total-reward:16236.6000000003
+rec_counts: 0.013025458851391355, total_reword:30306.599999999355
+epoch 62 :
+training-total-reward:16246.400000000333
+rec_counts: 0.0076968620485494375, total_reword:30287.899999999005
+epoch 63 :
+training-total-reward:16214.90000000031
+rec_counts: 0.010065127294256957, total_reword:30250.699999999233
+epoch 64 :
+training-total-reward:16290.500000000238
+rec_counts: 0.010657193605683837, total_reword:30264.49999999915
+epoch 65 :
+training-total-reward:16291.10000000028
+rec_counts: 0.010065127294256957, total_reword:30323.499999999218
+epoch 66 :
+training-total-reward:16235.100000000368
+rec_counts: 0.020130254588513915, total_reword:30294.59999999933
+epoch 67 :
+training-total-reward:16270.60000000025
+rec_counts: 0.009473060982830076, total_reword:30216.09999999943
+epoch 68 :
+training-total-reward:16299.000000000266
+rec_counts: 0.010657193605683837, total_reword:30341.19999999921
+epoch 69 :
+training-total-reward:16280.900000000316
+rec_counts: 0.015393724097098875, total_reword:30274.899999999277
+epoch 70 :
+training-total-reward:16258.100000000244
+rec_counts: 0.011249259917110717, total_reword:30238.2999999992
+epoch 71 :
+training-total-reward:16259.200000000328
+rec_counts: 0.010065127294256957, total_reword:30309.499999999294
+epoch 72 :
+training-total-reward:16251.20000000037
+rec_counts: 0.005920663114268798, total_reword:30319.899999999252
+epoch 73 :
+training-total-reward:16298.200000000246
+rec_counts: 0.005920663114268798, total_reword:30238.699999999208
+epoch 74 :
+training-total-reward:16260.0000000003
+rec_counts: 0.010657193605683837, total_reword:30285.599999999256
+epoch 75 :
+training-total-reward:16213.70000000033
+rec_counts: 0.008880994671403197, total_reword:30301.299999999275
+epoch 76 :
+training-total-reward:16308.900000000342
+rec_counts: 0.013617525162818236, total_reword:30255.099999999333
+epoch 77 :
+training-total-reward:16263.100000000282
+rec_counts: 0.011249259917110717, total_reword:30298.899999999216
+epoch 78 :
+training-total-reward:16292.300000000363
+rec_counts: 0.008288928359976317, total_reword:30298.099999999304
+epoch 79 :
+training-total-reward:16205.500000000322
+rec_counts: 0.013617525162818236, total_reword:30302.899999999125
+epoch 80 :
+training-total-reward:16303.30000000027
+rec_counts: 0.011249259917110717, total_reword:30335.799999999206
+epoch 81 :
+training-total-reward:16313.90000000031
+rec_counts: 0.0076968620485494375, total_reword:30311.39999999931
+epoch 82 :
+training-total-reward:16275.700000000259
+rec_counts: 0.012433392539964476, total_reword:30296.69999999937
+epoch 83 :
+training-total-reward:16260.70000000029
+rec_counts: 0.007104795737122558, total_reword:30277.199999999222
+epoch 84 :
+training-total-reward:16227.100000000286
+rec_counts: 0.010065127294256957, total_reword:30291.499999999272
+epoch 85 :
+training-total-reward:16278.70000000034
+rec_counts: 0.009473060982830076, total_reword:30273.999999999087
+epoch 86 :
+training-total-reward:16263.900000000313
+rec_counts: 0.011249259917110717, total_reword:30350.299999999123
+epoch 87 :
+training-total-reward:16214.100000000311
+rec_counts: 0.005920663114268798, total_reword:30297.599999999347
+epoch 88 :
+training-total-reward:16242.600000000315
+rec_counts: 0.005920663114268798, total_reword:30267.599999999275
+epoch 89 :
+training-total-reward:16292.700000000337
+rec_counts: 0.010065127294256957, total_reword:30317.699999999342
+epoch 90 :
+training-total-reward:16313.800000000309
+rec_counts: 0.009473060982830076, total_reword:30349.099999999286
+epoch 91 :
+training-total-reward:16278.90000000032
+rec_counts: 0.011249259917110717, total_reword:30273.299999999257
+epoch 92 :
+training-total-reward:16246.700000000332
+rec_counts: 0.013025458851391355, total_reword:30305.799999999163
+epoch 93 :
+training-total-reward:16244.400000000305
+rec_counts: 0.010657193605683837, total_reword:30283.79999999929
+epoch 94 :
+training-total-reward:16276.000000000291
+rec_counts: 0.0076968620485494375, total_reword:30356.799999999297
+epoch 95 :
+training-total-reward:16290.600000000266
+rec_counts: 0.007104795737122558, total_reword:30208.599999999336
+epoch 96 :
+training-total-reward:16268.400000000367
+rec_counts: 0.008288928359976317, total_reword:30329.29999999915
+epoch 97 :
+training-total-reward:16243.50000000035
+rec_counts: 0.008288928359976317, total_reword:30278.5999999992
+epoch 98 :
+training-total-reward:16298.400000000265
+rec_counts: 0.006512729425695678, total_reword:30291.899999999365
+epoch 99 :
+training-total-reward:16298.900000000316
+rec_counts: 0.008880994671403197, total_reword:30346.29999999917
+
+Process finished with exit code 0

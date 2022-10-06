@@ -310,11 +310,6 @@ for epoch in range(EPOCH):
             # 输出所在的block
             golden_item_block = blocks[1:]
 
-            # for i in range(min_length-1):
-            # input_iid = input_item_ids[:, i]
-            # golden_iids = golden_item_ids[:, i:]
-            # block_ids = golden_item_block[:, i:]
-            # cur_state
             init_state = actor.item_net.init_hidden
             # action_choose_time_start = time.time()
             for _ in range(TOPN):
