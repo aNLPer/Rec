@@ -42,7 +42,7 @@ TOPN = 10
 DATA_PATH = '../dataset/filtered_data.csv'
 BATCH_SIZE = 1
 GAMMA = 0.8
-LR = 1e-4
+LR = 1e-5
 # ITEM_DIM == USER_DIM == BUDGET_DIM
 ITEM_DIM = 200
 BUDGET_DIM = 512
@@ -283,7 +283,7 @@ for epoch in range(EPOCH):
         # true_gradient = grad[logPi(a|s) * td_error]
         # 然后根据前面学到的V（s）值，训练actor，以更好地采样动作
     # 评价模型
-    print(f"training-total-reward:{train_total_reward}")
+    # print(f"training-reward:{train_total_reward}")
     # hr, map_, mrr = evaluate(goldens, selected_blocks, item_dists, dp.item_blocks, TOPN=TOPN)
     # print(f"train_total-reward: {round(train_total_reword, 2)}  train_mrr:{round(mrr, 2)}  train_hr:{round(hr, 2)}  train_map:{round(map_, 2)}  train_block_acc: {selected_block_num/train_rec_count}")
 
@@ -328,7 +328,7 @@ for epoch in range(EPOCH):
                 # input_iid = selected_item_id
 
     # 评价模型
-    print(f"rec_counts: {topn_rec/rec_count}, total_reword:{valid_total_reward} ")
+    print(f"topn_hit: {topn_rec/rec_count}")
     # hr, map_, mrr = evaluate(goldens, selected_blocks, item_dists, dp.item_blocks, TOPN=TOPN)
     # print(f"valid_total-reward: {round(valid_total_reward, 2)} valid_mrr:{round(mrr, 2)}  valid_hr:{round(hr, 2)}  valid_map:{round(map_, 2)} "
     #       f"valid_block_acc: {round(selected_block_num/valid_rec_count, 2)} \ntime: {round((time.time() - epoch_time) / 60, 2) }min\n")
